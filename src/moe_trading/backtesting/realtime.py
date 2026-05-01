@@ -186,6 +186,10 @@ class MoELiveModelAdapter:
         )
         self.rule_engine = PropRuleEngine(config.prop)
         self.calibration_artifact = load_calibration_artifact(Path(model_path).parent / "calibration.json")
+        manager_artifact = self.calibration_artifact.get("manager", {}) if isinstance(self.calibration_artifact, dict) else {}
+        self.manager_scale = float(manager_artifact.get("scale", 1.0))
+        self.manager_bias = float(manager_artifact.get("bias", 0.0))
+        self.manager_threshold = float(manager_artifact.get("threshold", self.config.backtest.min_trade_probability))
 
         asset_input_dim = len(bundle.asset_feature_columns["US100"])
         cross_input_dim = len(bundle.cross_asset_feature_columns)
@@ -282,9 +286,10 @@ class MoELiveModelAdapter:
                 account_context=account_context,
             )
 
-        manager_trade = float(manager_output["manager_trade_probability"].item())
+        manager_trade_logit = float(manager_output["manager_trade_logits"].item())
+        manager_trade = float(1.0 / (1.0 + np.exp(-((manager_trade_logit * self.manager_scale) + self.manager_bias))))
         context_score = float(manager_output["manager_context_score"].item())
-        if manager_trade < self.config.backtest.min_trade_probability or context_score < self.config.backtest.min_context_score:
+        if manager_trade < self.manager_threshold or context_score < self.config.backtest.min_context_score:
             return []
 
         calibrated = apply_calibration(

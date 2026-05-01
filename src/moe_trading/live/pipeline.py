@@ -39,6 +39,7 @@ def infer_latest_decision(config: AppConfig) -> LiveTradeDecision:
     bundle = build_feature_bundle(config)
     model_path = resolve_model_checkpoint(config.experiment.output_dir)
     calibration_artifact = load_calibration_artifact(model_path.parent / "calibration.json")
+    manager_artifact = calibration_artifact.get("manager", {}) if isinstance(calibration_artifact, dict) else {}
     scaler_payload = json.loads((model_path.parent / "scaler.json").read_text(encoding="utf-8"))
     scaler = FeatureScaler.from_dict({"means": scaler_payload["means"], "stds": scaler_payload["stds"]})
     feature_columns = scaler_payload["feature_columns"]
@@ -86,7 +87,11 @@ def infer_latest_decision(config: AppConfig) -> LiveTradeDecision:
         )
         output = model(asset_sequences, cross_seq, regime_seq, manager_context, account_context=account_context)
 
-    manager_trade = float(output.manager_trade_probability.item())
+    manager_trade_logit = float(output.manager_trade_logits.item())
+    manager_scale = float(manager_artifact.get("scale", 1.0))
+    manager_bias = float(manager_artifact.get("bias", 0.0))
+    manager_threshold = float(manager_artifact.get("threshold", config.backtest.min_trade_probability))
+    manager_trade = float(1.0 / (1.0 + np.exp(-((manager_trade_logit * manager_scale) + manager_bias))))
     dual_trade = float(output.manager_dual_probability.item()) >= 0.5
     context_score = float(output.manager_context_score.item())
     calibrated = apply_calibration(output.expert_setup_logits, calibration_artifact)[0].cpu().numpy()
@@ -97,7 +102,7 @@ def infer_latest_decision(config: AppConfig) -> LiveTradeDecision:
     chosen_directions: dict[str, int] = {}
     chosen_probs: dict[str, float] = {}
 
-    if manager_trade >= config.backtest.min_trade_probability and context_score >= config.backtest.min_context_score:
+    if manager_trade >= manager_threshold and context_score >= config.backtest.min_context_score:
         for asset_idx, asset in enumerate(("US100", "US500")):
             routed_scores = routed_expert_scores(
                 calibrated[asset_idx],

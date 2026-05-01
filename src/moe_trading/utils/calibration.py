@@ -52,3 +52,28 @@ def apply_calibration(logits: torch.Tensor, artifact: dict | None) -> torch.Tens
         scales = scales.unsqueeze(0)
         biases = biases.unsqueeze(0)
     return torch.sigmoid((logits * scales) + biases)
+
+
+def calibration_error(y_true: torch.Tensor | list[float], y_prob: torch.Tensor | list[float], bins: int = 10) -> float:
+    true = torch.as_tensor(y_true, dtype=torch.float32).reshape(-1)
+    prob = torch.as_tensor(y_prob, dtype=torch.float32).reshape(-1)
+    valid = torch.isfinite(true) & torch.isfinite(prob)
+    true = true[valid]
+    prob = prob[valid]
+    if true.numel() == 0:
+        return 0.0
+    edges = torch.linspace(0.0, 1.0, steps=bins + 1)
+    error = torch.tensor(0.0)
+    n = float(true.numel())
+    for idx in range(bins):
+        lo = edges[idx]
+        hi = edges[idx + 1]
+        if idx == bins - 1:
+            mask = (prob >= lo) & (prob <= hi)
+        else:
+            mask = (prob >= lo) & (prob < hi)
+        if not torch.any(mask):
+            continue
+        weight = float(mask.sum()) / n
+        error = error + torch.abs(true[mask].mean() - prob[mask].mean()) * weight
+    return float(error.item())
