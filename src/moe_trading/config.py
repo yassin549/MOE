@@ -139,6 +139,8 @@ class BacktestConfig:
     target_trades_per_day_min: float = 2.0
     target_trades_per_day_max: float = 3.0
     exceptional_day_trade_cap: int = 4
+    expectancy_min_trades: int = 30
+    expectancy_confidence_level: float = 0.95
 
 
 @dataclass(slots=True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,19 @@ from moe_trading.utils.io import ensure_dir, save_json
 
 
 ASSETS = ("US100", "US500")
+
+
+def _normal_quantile(confidence_level: float) -> float:
+    """Approximate two-tailed z-score for a confidence level."""
+    return 1.959963984540054 if confidence_level >= 0.95 else 1.6448536269514722
+
+
+def _mean_confidence_interval_from_summary(mean: float, sample_std: float, n: int, confidence_level: float) -> tuple[float, float]:
+    if n <= 1:
+        return mean, mean
+    stderr = sample_std / math.sqrt(n)
+    margin = _normal_quantile(confidence_level) * stderr
+    return mean - margin, mean + margin
 
 
 def _safe_mean(series: pd.Series) -> float:
@@ -94,6 +108,7 @@ def compute_label_audit_table(
                     "raw_heuristic_expectancy_r": _safe_mean(raw_returns),
                     "post_cost_expectancy_r": _safe_mean(net_returns),
                     "valid_post_cost_expectancy_r": _safe_mean(valid_net_returns),
+                    "valid_post_cost_std_r": float(valid_net_returns.std(ddof=1)) if len(valid_net_returns) > 1 else 0.0,
                     "tradable_share_of_present": float(tradable_mask.sum() / max(present_mask.sum(), 1)),
                     "mean_manager_edge_threshold_r": min_edge_r,
                 }
@@ -101,7 +116,7 @@ def compute_label_audit_table(
     return pd.DataFrame(rows)
 
 
-def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
+def compute_heuristic_baseline_table(label_audit: pd.DataFrame, config: AppConfig) -> pd.DataFrame:
     if label_audit.empty:
         return pd.DataFrame(
             columns=[
@@ -110,6 +125,12 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
                 "trades",
                 "win_rate",
                 "expectancy_r",
+                "expectancy_ci_lower_r",
+                "expectancy_ci_upper_r",
+                "expectancy_confidence_level",
+                "expectancy_evaluable",
+                "expectancy_significance_flag",
+                "expectancy_status",
                 "profitability_gate_pass",
                 "long_share",
                 "short_share",
@@ -122,6 +143,7 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
             "setup_present_count",
             "positive_net_rate",
             "post_cost_expectancy_r",
+            "valid_post_cost_std_r",
             "direction_long_share",
             "direction_short_share",
         ]
@@ -135,14 +157,39 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
             "direction_short_share": "short_share",
         }
     )
-    baseline["profitability_gate_pass"] = baseline["expectancy_r"] > 0.0
+    min_trades = max(int(config.backtest.expectancy_min_trades), 1)
+    confidence_level = float(config.backtest.expectancy_confidence_level)
+    baseline["expectancy_confidence_level"] = confidence_level
+    baseline["expectancy_ci_lower_r"] = baseline["expectancy_r"]
+    baseline["expectancy_ci_upper_r"] = baseline["expectancy_r"]
+    baseline["expectancy_evaluable"] = baseline["trades"] >= min_trades
+    baseline["expectancy_status"] = np.where(baseline["expectancy_evaluable"], "evaluable", "not_enough_data")
+    baseline["expectancy_significance_flag"] = False
+    baseline["profitability_gate_pass"] = False
+
+    evaluable_mask = baseline["expectancy_evaluable"]
+    for idx in baseline.index[evaluable_mask]:
+        lower, upper = _mean_confidence_interval_from_summary(
+            mean=float(baseline.at[idx, "expectancy_r"]),
+            sample_std=float(baseline.at[idx, "valid_post_cost_std_r"]),
+            n=int(baseline.at[idx, "trades"]),
+            confidence_level=confidence_level,
+        )
+        baseline.at[idx, "expectancy_ci_lower_r"] = lower
+        baseline.at[idx, "expectancy_ci_upper_r"] = upper
+    baseline.loc[evaluable_mask, "expectancy_significance_flag"] = baseline.loc[evaluable_mask, "expectancy_r"] > 0.0
+    baseline.loc[evaluable_mask, "profitability_gate_pass"] = (
+        (baseline.loc[evaluable_mask, "expectancy_r"] > 0.0)
+        & (baseline.loc[evaluable_mask, "expectancy_ci_lower_r"] >= 0.0)
+    )
+    baseline = baseline.drop(columns=["valid_post_cost_std_r"])
     return baseline
 
 
 def generate_phase1_audit_artifacts(frame: pd.DataFrame, config: AppConfig, output_dir: str | Path) -> dict[str, Any]:
     output_path = ensure_dir(output_dir)
     label_audit = compute_label_audit_table(frame, config.model.setup_names, config)
-    heuristic_baseline = compute_heuristic_baseline_table(label_audit)
+    heuristic_baseline = compute_heuristic_baseline_table(label_audit, config)
 
     label_audit.to_csv(output_path / "label_audit.csv", index=False)
     heuristic_baseline.to_csv(output_path / "heuristic_baseline.csv", index=False)
