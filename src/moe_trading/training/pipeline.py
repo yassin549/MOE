@@ -258,9 +258,73 @@ def _selection_objective(metrics: dict[str, float]) -> float:
     return brier + (1.0 - f1) + collapse_penalty
 
 
+def _calibration_error(y_true: np.ndarray, y_prob: np.ndarray, bins: int = 10) -> float:
+    if y_true.size == 0:
+        return 0.0
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    ece = 0.0
+    for idx in range(bins):
+        if idx == bins - 1:
+            mask = (y_prob >= edges[idx]) & (y_prob <= edges[idx + 1])
+        else:
+            mask = (y_prob >= edges[idx]) & (y_prob < edges[idx + 1])
+        if not mask.any():
+            continue
+        confidence = float(y_prob[mask].mean())
+        accuracy = float(y_true[mask].mean())
+        ece += float(mask.mean()) * abs(confidence - accuracy)
+    return float(ece)
+
+
+def _fit_manager_calibration_and_threshold(
+    y_prob: np.ndarray,
+    y_true: np.ndarray,
+    realized_returns: np.ndarray,
+    config: AppConfig,
+) -> tuple[dict[str, float], float, dict[str, float]]:
+    y_prob_t = torch.tensor(y_prob, dtype=torch.float32)
+    y_true_t = torch.tensor(y_true, dtype=torch.float32)
+    scale, bias = fit_platt_scaler(y_prob_t.logit(eps=1e-6), y_true_t, min_samples=config.train.calibration_min_samples)
+    calibrated_prob = 1.0 / (1.0 + np.exp(-((y_prob_t.numpy() * 0 + y_prob_t.logit(eps=1e-6).numpy()) * scale + bias)))
+
+    candidate_thresholds = np.linspace(0.05, 0.95, 37)
+    best_threshold = float(config.backtest.min_trade_probability)
+    best_expectancy = float("-inf")
+    for threshold in candidate_thresholds:
+        routed = calibrated_prob >= threshold
+        expectancy = float(realized_returns[routed].mean()) if routed.any() else float("-inf")
+        if expectancy > best_expectancy:
+            best_expectancy = expectancy
+            best_threshold = float(threshold)
+
+    def _metric_block(probs: np.ndarray) -> dict[str, float]:
+        classification = binary_classification_metrics(y_true, probs, threshold=best_threshold)
+        routed = probs >= best_threshold
+        return {
+            "brier": float(classification["brier"]),
+            "calibration_error": _calibration_error(y_true, probs),
+            "precision_at_threshold": float(classification["precision"]),
+            "routed_expectancy": float(realized_returns[routed].mean()) if routed.any() else 0.0,
+            "route_rate": float(routed.mean()) if routed.size else 0.0,
+        }
+
+    return (
+        {"scale": float(scale), "bias": float(bias)},
+        best_threshold,
+        {
+            "pre": _metric_block(y_prob),
+            "post": _metric_block(calibrated_prob),
+            "selection_post_cost_expectancy": best_expectancy if np.isfinite(best_expectancy) else 0.0,
+        },
+    )
+
+
 def _fit_calibration_artifact(model: MultiAssetMoE, loader: DataLoader, device: torch.device, config: AppConfig) -> dict[str, object]:
     logits_batches: list[torch.Tensor] = []
     target_batches: list[torch.Tensor] = []
+    manager_prob_batches: list[np.ndarray] = []
+    manager_target_batches: list[np.ndarray] = []
+    manager_return_batches: list[np.ndarray] = []
     model.eval()
     with torch.inference_mode():
         for batch in loader:
@@ -274,6 +338,9 @@ def _fit_calibration_artifact(model: MultiAssetMoE, loader: DataLoader, device: 
             )
             logits_batches.append(output.expert_setup_logits.detach().cpu())
             target_batches.append(batch["expert_labels"].detach().cpu())
+            manager_prob_batches.append(output.manager_trade_probability.detach().cpu().numpy().reshape(-1))
+            manager_target_batches.append(batch["manager_labels"][:, 0].detach().cpu().numpy().reshape(-1))
+            manager_return_batches.append(batch["returns"].amax(dim=(1, 2)).detach().cpu().numpy().reshape(-1))
     if not logits_batches:
         num_assets = 2
         num_experts = len(config.model.setup_names)
@@ -302,12 +369,21 @@ def _fit_calibration_artifact(model: MultiAssetMoE, loader: DataLoader, device: 
             asset_biases.append(bias)
         scales.append(asset_scales)
         biases.append(asset_biases)
+    manager_calibration, threshold, manager_metrics = _fit_manager_calibration_and_threshold(
+        np.concatenate(manager_prob_batches) if manager_prob_batches else np.array([], dtype=np.float32),
+        np.concatenate(manager_target_batches) if manager_target_batches else np.array([], dtype=np.float32),
+        np.concatenate(manager_return_batches) if manager_return_batches else np.array([], dtype=np.float32),
+        config,
+    )
     return {
         "method": config.train.calibration_method,
         "asset_names": ["US100", "US500"],
         "setup_names": list(config.model.setup_names),
         "scales": scales,
         "biases": biases,
+        "manager_calibration": manager_calibration,
+        "manager_routing_threshold": threshold,
+        "manager_calibration_metrics": manager_metrics,
     }
 
 
