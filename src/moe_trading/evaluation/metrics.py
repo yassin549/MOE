@@ -113,6 +113,86 @@ def _period_return_summary(trades: pd.DataFrame, freq: str) -> dict[str, Any]:
     }
 
 
+def _profit_factor_from_returns(returns: np.ndarray) -> float | None:
+    wins = returns[returns > 0]
+    losses = returns[returns < 0]
+    gross_profit = float(wins.sum()) if wins.size else 0.0
+    gross_loss = float(losses.sum()) if losses.size else 0.0
+    if not losses.size:
+        return None if wins.size else 0.0
+    if gross_profit == 0.0:
+        return 0.0
+    return float(gross_profit / abs(gross_loss))
+
+
+def _normal_z_for_confidence(confidence_level: float) -> float:
+    if confidence_level >= 0.99:
+        return 2.576
+    if confidence_level >= 0.95:
+        return 1.96
+    if confidence_level >= 0.90:
+        return 1.645
+    return 1.282
+
+
+def _expectancy_confidence_interval(returns: np.ndarray, confidence_level: float) -> tuple[float, float]:
+    if returns.size == 0:
+        return 0.0, 0.0
+    mean = float(returns.mean())
+    if returns.size <= 1:
+        return mean, mean
+    std = float(returns.std(ddof=1))
+    stderr = std / math.sqrt(returns.size)
+    margin = _normal_z_for_confidence(confidence_level) * stderr
+    return mean - margin, mean + margin
+
+
+def expert_trade_metrics(trades: pd.DataFrame) -> list[dict[str, Any]]:
+    if trades.empty:
+        return []
+
+    total_trades = max(len(trades), 1)
+    confidence_level = 0.95
+    rows: list[dict[str, Any]] = []
+    for expert_name, expert_trades in trades.groupby("expert", dropna=False):
+        returns = expert_trades["net_return_r"].to_numpy(dtype=np.float64)
+        directions = expert_trades["direction"].to_numpy(dtype=np.int64) if "direction" in expert_trades.columns else np.array([], dtype=np.int64)
+        assets = expert_trades["asset"] if "asset" in expert_trades.columns else pd.Series(dtype="object")
+        risk_values = (
+            expert_trades["risk_fraction"].to_numpy(dtype=np.float64)
+            if "risk_fraction" in expert_trades.columns
+            else np.array([], dtype=np.float64)
+        )
+        long_share = float((directions > 0).mean()) if directions.size else 0.0
+        short_share = float((directions < 0).mean()) if directions.size else 0.0
+        us100_share = float((assets == "US100").mean()) if len(assets) else 0.0
+        us500_share = float((assets == "US500").mean()) if len(assets) else 0.0
+        expectancy_ci_lower, expectancy_ci_upper = _expectancy_confidence_interval(returns, confidence_level)
+        rows.append(
+            {
+                "expert": str(expert_name),
+                "routed_usage_share": float(len(expert_trades) / total_trades),
+                "executed_trade_count": int(len(expert_trades)),
+                "win_rate": float((returns > 0).mean()) if returns.size else 0.0,
+                "expectancy_r": float(returns.mean()) if returns.size else 0.0,
+                "expectancy_ci_lower_r": expectancy_ci_lower,
+                "expectancy_ci_upper_r": expectancy_ci_upper,
+                "expectancy_confidence_level": confidence_level,
+                "expectancy_confident_positive": bool(returns.size > 0 and returns.mean() > 0.0 and expectancy_ci_lower >= 0.0),
+                "profit_factor": _profit_factor_from_returns(returns),
+                "direction_long_share": long_share,
+                "direction_short_share": short_share,
+                "direction_dominant_share": max(long_share, short_share),
+                "asset_us100_share": us100_share,
+                "asset_us500_share": us500_share,
+                "asset_dominant_share": max(us100_share, us500_share),
+                "average_risk_fraction": float(risk_values.mean()) if risk_values.size else 0.0,
+            }
+        )
+    rows.sort(key=lambda item: (-item["executed_trade_count"], item["expert"]))
+    return rows
+
+
 def _challenge_window_result(
     trades: pd.DataFrame,
     start_day: pd.Timestamp,
@@ -249,6 +329,7 @@ def backtest_diagnostics(
             .astype(float)
             .to_dict()
         )
+    expert_metrics = expert_trade_metrics(trades)
     return {
         "daily": daily,
         "weekly": weekly,
@@ -256,6 +337,10 @@ def backtest_diagnostics(
         "average_winning_day_profit_r": float(daily["average_win_return_r"]),
         "average_losing_day_loss_r": float(daily["average_loss_return_r"]),
         "average_risk_per_trade_by_expert": risk_by_expert,
+        "active_expert_count": int(sum(1 for row in expert_metrics if row["executed_trade_count"] > 0)),
+        "experts_with_positive_expectancy": int(sum(1 for row in expert_metrics if row["expectancy_r"] > 0.0)),
+        "experts_with_confident_positive_expectancy": int(sum(1 for row in expert_metrics if row["expectancy_confident_positive"])),
+        "max_expert_usage_share": float(max((row["routed_usage_share"] for row in expert_metrics), default=0.0)),
         **pass_metrics,
     }
 

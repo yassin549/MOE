@@ -11,9 +11,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from moe_trading.backtesting.realtime import RealtimeBacktestSimulator, build_realtime_components
 from moe_trading.config import load_config
+from moe_trading.cost_model import cost_model_metadata
 from moe_trading.data.splitting import make_time_split
-from moe_trading.evaluation.metrics import backtest_diagnostics
-from moe_trading.evaluation.metrics import routed_usage_gate, trade_metrics
+from moe_trading.evaluation.metrics import backtest_diagnostics, expert_trade_metrics, routed_usage_gate, trade_metrics
 from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 
 
@@ -31,6 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_parser().parse_args()
     config = load_config(args.config)
+    run_cost_model = cost_model_metadata(config)
     candles, adapter, replay, frame = build_realtime_components(
         config,
         experiment_dir=args.experiment_dir,
@@ -41,9 +42,10 @@ if __name__ == "__main__":
     evaluation_start = str(candles.timestamp_str[0]) if len(candles.timestamp_str) else None
     evaluation_end = str(candles.timestamp_str[-1]) if len(candles.timestamp_str) else None
     diagnostics = backtest_diagnostics(result.trades_frame, config, evaluation_start, evaluation_end)
+    expert_metrics = expert_trade_metrics(result.trades_frame)
     split = make_time_split(frame, config.data.validation_ratio, config.data.test_ratio, config.data.embargo_bars)
 
-    def _split_metrics(partition_name: str, partition_frame) -> dict:
+    def _split_metrics(partition_frame) -> dict:
         if result.trades_frame.empty:
             part_trades = result.trades_frame.copy()
         else:
@@ -58,9 +60,9 @@ if __name__ == "__main__":
         }
 
     split_breakdown = {
-        "train": _split_metrics("train", split.train),
-        "validation": _split_metrics("validation", split.validation),
-        "test": _split_metrics("test", split.test),
+        "train": _split_metrics(split.train),
+        "validation": _split_metrics(split.validation),
+        "test": _split_metrics(split.test),
     }
     routed_gate = routed_usage_gate(result.trades_frame, config)
     detailed_metrics = {
@@ -68,6 +70,7 @@ if __name__ == "__main__":
         "diagnostics": diagnostics,
         "routed_usage_gate": routed_gate,
         "split_breakdown": split_breakdown,
+        "expert_metrics": expert_metrics,
         "performance": result.performance,
         "metadata": make_run_metadata(
             config_name=str(args.config),
@@ -76,6 +79,7 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            **run_cost_model,
         ),
     }
 
@@ -83,10 +87,13 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "backtest_summary.json").write_text(json.dumps(result.summary, indent=2), encoding="utf-8")
     (output_dir / "backtest_diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
+    (output_dir / "expert_trade_metrics.json").write_text(json.dumps(expert_metrics, indent=2), encoding="utf-8")
     (output_dir / "backtest_detailed_metrics.json").write_text(json.dumps(detailed_metrics, indent=2), encoding="utf-8")
     (output_dir / "backtest_performance.json").write_text(json.dumps(result.performance, indent=2), encoding="utf-8")
     np.save(output_dir / "equity_curve.npy", result.equity_curve)
     result.trades_frame.to_csv(output_dir / "trades.csv", index=False)
+    if expert_metrics:
+        pd.DataFrame(expert_metrics).to_csv(output_dir / "expert_trade_metrics.csv", index=False)
     row = {
         **make_run_metadata(
             config_name=str(args.config),
@@ -95,6 +102,7 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            **run_cost_model,
         ),
         **flatten_for_sheet(result.summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),

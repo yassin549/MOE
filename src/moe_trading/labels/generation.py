@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from moe_trading.config import BacktestConfig, LabelConfig
+from moe_trading.cost_model import CostModelSpec, cost_model_version, total_round_trip_bps
 
 
 SETUP_DIRECTIONAL = {
@@ -212,7 +213,7 @@ def _net_return_after_costs(
     stop_distance: float,
     backtest_config: BacktestConfig,
 ) -> float:
-    total_bps = 2.0 * (backtest_config.spread_bps + backtest_config.slippage_bps + backtest_config.commission_bps)
+    total_bps = total_round_trip_bps(backtest_config)
     total_price_cost = entry_price * (total_bps / 10_000.0)
     return float(return_r - (total_price_cost / max(stop_distance, 1e-6)))
 
@@ -228,6 +229,7 @@ def generate_labels(
     backtest_config = backtest_config or BacktestConfig()
     output_columns: dict[str, np.ndarray | pd.Series] = {}
     manager_targets: dict[str, np.ndarray] = {}
+    model_version = cost_model_version(CostModelSpec.from_backtest_config(backtest_config))
 
     timestamp_series = labeled["timestamp"].astype(str) if "timestamp" in labeled.columns else pd.Series(labeled.index.astype(str), index=labeled.index)
 
@@ -315,7 +317,7 @@ def generate_labels(
             output_columns[trigger_col] = timestamp_series.to_numpy()
             output_columns[earliest_tradable_col] = timestamp_series.shift(-1).fillna(timestamp_series).to_numpy()
             output_columns[horizon_col] = np.full(len(labeled), label_config.max_holding_bars, dtype=np.int64)
-            output_columns[cost_col] = np.full(len(labeled), "round_trip_bps_spread_slippage_commission", dtype=object)
+            output_columns[cost_col] = np.full(len(labeled), model_version, dtype=object)
             output_columns[setup_input_col] = input_available.astype(np.int64)
             manager_targets[f"{prefix}_{setup}"] = tradable_values.astype(np.int64)
             per_setup_valids.append(valid_values)

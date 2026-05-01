@@ -152,5 +152,6 @@ def test_generate_labels_adds_temporal_protocol_columns_and_passes_leakage_check
     assert "us100_trend_continuation_earliest_tradable_timestamp" in labeled.columns
     assert "us100_trend_continuation_outcome_horizon_bars" in labeled.columns
     assert "us100_trend_continuation_cost_model" in labeled.columns
+    assert labeled["us100_trend_continuation_cost_model"].str.startswith("cm-").all()
     report = run_label_leakage_checks(labeled, ["trend_continuation"], LabelConfig().max_holding_bars)
     assert report["passed"]

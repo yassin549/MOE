@@ -10,10 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from moe_trading.config import load_config
+from moe_trading.cost_model import cost_model_metadata
+from moe_trading.evaluation.metrics import backtest_diagnostics, expert_trade_metrics, trade_metrics
+from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 from moe_trading.experiments.scheduler import ExpertCompletionCriteria, ExpertSchedulerConfig, expert_status_report
 from moe_trading.utils.io import save_json
-from moe_trading.evaluation.metrics import backtest_diagnostics, trade_metrics
-from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -32,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_parser().parse_args()
     config = load_config(args.config)
+    run_cost_model = cost_model_metadata(config)
     trades = pd.read_csv(args.trades)
     if "risk_fraction" not in trades.columns:
         trades["risk_fraction"] = float(config.backtest.challenge_risk_fraction)
@@ -46,16 +48,18 @@ if __name__ == "__main__":
         ),
     )
     expert_status = expert_status_report(trades, scheduler_cfg)
-
+    expert_metrics = expert_trade_metrics(trades)
+    output_dir = Path(args.output_dir or Path(args.trades).parent)
     row = {
         **make_run_metadata(
             config_name=str(args.config),
             experiment_name=config.experiment.name,
-            output_dir=str(args.output_dir or Path(args.trades).parent),
+            output_dir=str(output_dir),
             model_path=args.model_path,
             evaluation_start=args.evaluation_start,
             evaluation_end=args.evaluation_end,
             baseline_tag=args.baseline_tag,
+            **run_cost_model,
         ),
         **flatten_for_sheet(summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
@@ -63,6 +67,19 @@ if __name__ == "__main__":
     for idx, item in enumerate(expert_status):
         row.update(flatten_for_sheet(item, f"expert_status_{idx:02d}"))
     append_run_sheet(row, args.sheet_path)
-    artifact_path = Path(args.output_dir or Path(args.trades).parent) / "expert_experiment_status.json"
+    artifact_path = output_dir / "expert_experiment_status.json"
     save_json({"scheduler": asdict(scheduler_cfg), "experts": expert_status}, artifact_path)
-    print(json.dumps({"recorded": True, "sheet_path": args.sheet_path, "num_trades": int(summary["num_trades"]), "expert_status_path": str(artifact_path)}, indent=2))
+    if expert_metrics:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(expert_metrics).to_csv(output_dir / "expert_trade_metrics.csv", index=False)
+    print(
+        json.dumps(
+            {
+                "recorded": True,
+                "sheet_path": args.sheet_path,
+                "num_trades": int(summary["num_trades"]),
+                "expert_status_path": str(artifact_path),
+            },
+            indent=2,
+        )
+    )

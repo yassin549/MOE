@@ -27,6 +27,7 @@ def test_heuristic_baseline_reports_not_enough_data_when_below_threshold():
     assert row["trades"] == 2
     assert not bool(row["expectancy_evaluable"])
     assert row["expectancy_data_state"] == "not_enough_data"
+    assert row["expectancy_status"] == "not_enough_data"
     assert not bool(row["profitability_gate_pass"])
 
 
@@ -65,7 +66,9 @@ def test_heuristic_baseline_requires_positive_point_and_non_negative_ci_bound():
     assert bool(baseline.loc[0, "expectancy_evaluable"])
     assert not bool(baseline.loc[0, "profitability_gate_pass"])
     assert not bool(baseline.loc[0, "expectancy_significant"])
+    assert not bool(baseline.loc[0, "expectancy_confident_positive"])
 
     assert bool(baseline.loc[1, "expectancy_evaluable"])
     assert bool(baseline.loc[1, "profitability_gate_pass"])
     assert bool(baseline.loc[1, "expectancy_significant"])
+    assert bool(baseline.loc[1, "expectancy_confident_positive"])

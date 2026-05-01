@@ -46,6 +46,26 @@ def _expectancy_confidence_interval(series: pd.Series, confidence_level: float) 
     return mean - margin, mean + margin
 
 
+def _expectancy_gate_fields(series: pd.Series, confidence_level: float, min_trades: int) -> dict[str, Any]:
+    ci_lower, ci_upper = _expectancy_confidence_interval(series, confidence_level)
+    evaluable = int(series.size) >= int(min_trades)
+    ci_non_negative = evaluable and ci_lower >= 0.0
+    positive_mean = _safe_mean(series) > 0.0
+    return {
+        "expectancy_confidence_level": float(confidence_level),
+        "expectancy_min_trades": int(min_trades),
+        "expectancy_evaluable": bool(evaluable),
+        "expectancy_data_state": "evaluable" if evaluable else "not_enough_data",
+        "expectancy_status": "evaluable" if evaluable else "not_enough_data",
+        "expectancy_ci_lower_r": ci_lower,
+        "expectancy_ci_upper_r": ci_upper,
+        "expectancy_ci_non_negative": bool(ci_non_negative),
+        "expectancy_significant": bool(ci_non_negative),
+        "expectancy_confident_positive": bool(evaluable and positive_mean and ci_non_negative),
+        "profitability_gate_pass": bool(evaluable and positive_mean and ci_non_negative),
+    }
+
+
 def _direction_balance(direction: pd.Series) -> dict[str, float]:
     if direction.empty:
         return {
@@ -96,9 +116,9 @@ def compute_label_audit_table(
             net_returns = frame.loc[present_mask, net_return_col]
             valid_net_returns = frame.loc[valid_mask, net_return_col]
             positive_net_rate = float((valid_net_returns > 0).mean()) if valid_mask.any() else 0.0
-            expectancy_ci_lower, expectancy_ci_upper = _expectancy_confidence_interval(net_returns, confidence_level)
             balance = _direction_balance(direction)
             min_side_share = min(balance["long_share"], balance["short_share"])
+            expectancy_gate = _expectancy_gate_fields(net_returns, confidence_level, min_expectancy_trades)
 
             rows.append(
                 {
@@ -120,12 +140,10 @@ def compute_label_audit_table(
                     "direction_symmetry_pass": (not SETUP_DIRECTIONAL.get(setup, True)) or (min_side_share >= threshold),
                     "raw_heuristic_expectancy_r": _safe_mean(raw_returns),
                     "post_cost_expectancy_r": _safe_mean(net_returns),
-                    "expectancy_ci_lower_r": expectancy_ci_lower,
-                    "expectancy_ci_upper_r": expectancy_ci_upper,
                     "valid_post_cost_expectancy_r": _safe_mean(valid_net_returns),
-                    "expectancy_min_trades": min_expectancy_trades,
                     "tradable_share_of_present": float(tradable_mask.sum() / max(present_mask.sum(), 1)),
                     "mean_manager_edge_threshold_r": min_edge_r,
+                    **expectancy_gate,
                 }
             )
     return pd.DataFrame(rows)
@@ -142,10 +160,14 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
                 "expectancy_r",
                 "expectancy_ci_lower_r",
                 "expectancy_ci_upper_r",
+                "expectancy_confidence_level",
+                "expectancy_ci_non_negative",
                 "expectancy_min_trades",
                 "expectancy_evaluable",
                 "expectancy_data_state",
+                "expectancy_status",
                 "expectancy_significant",
+                "expectancy_confident_positive",
                 "profitability_gate_pass",
                 "long_share",
                 "short_share",
@@ -177,11 +199,14 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
     baseline["expectancy_min_trades"] = baseline["expectancy_min_trades"].astype(int)
     baseline["expectancy_evaluable"] = baseline["trades"] >= baseline["expectancy_min_trades"]
     baseline["expectancy_data_state"] = np.where(baseline["expectancy_evaluable"], "evaluable", "not_enough_data")
-    baseline["expectancy_significant"] = baseline["expectancy_evaluable"] & (baseline["expectancy_ci_lower_r"] >= 0.0)
+    baseline["expectancy_status"] = baseline["expectancy_data_state"]
+    baseline["expectancy_ci_non_negative"] = baseline["expectancy_evaluable"] & (baseline["expectancy_ci_lower_r"] >= 0.0)
+    baseline["expectancy_significant"] = baseline["expectancy_ci_non_negative"]
+    baseline["expectancy_confident_positive"] = baseline["expectancy_evaluable"] & (baseline["expectancy_r"] > 0.0) & baseline["expectancy_ci_non_negative"]
     baseline["profitability_gate_pass"] = (
         baseline["expectancy_evaluable"]
         & (baseline["expectancy_r"] > 0.0)
-        & (baseline["expectancy_ci_lower_r"] >= 0.0)
+        & baseline["expectancy_ci_non_negative"]
     )
     return baseline
 
@@ -202,4 +227,5 @@ def generate_phase1_audit_artifacts(frame: pd.DataFrame, config: AppConfig, outp
         "label_failures": int((~label_audit["direction_symmetry_pass"]).sum()) if not label_audit.empty else 0,
         "negative_expectancy_labels": int((label_audit["post_cost_expectancy_r"] <= 0.0).sum()) if not label_audit.empty else 0,
         "negative_expectancy_heuristics": int((heuristic_baseline["expectancy_r"] <= 0.0).sum()) if not heuristic_baseline.empty else 0,
+        "confidence_positive_heuristics": int(heuristic_baseline["expectancy_confident_positive"].sum()) if not heuristic_baseline.empty else 0,
     }

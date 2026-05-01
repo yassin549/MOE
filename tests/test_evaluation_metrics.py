@@ -5,7 +5,7 @@ import pandas as pd
 
 from moe_trading.backtesting.engine import _discover_backtest_artifacts
 from moe_trading.config import AppConfig
-from moe_trading.evaluation.metrics import backtest_diagnostics, trade_metrics
+from moe_trading.evaluation.metrics import backtest_diagnostics, expert_trade_metrics, trade_metrics
 
 
 def test_trade_metrics_exposes_quant_summary_fields():
@@ -70,7 +70,31 @@ def test_backtest_diagnostics_reports_period_and_pass_fields():
     assert diagnostics["daily"]["periods"] == 3
     assert diagnostics["daily"]["win_rate"] == 1.0
     assert diagnostics["average_risk_per_trade_by_expert"]["trend"] == 0.009
+    assert diagnostics["active_expert_count"] == 1
+    assert diagnostics["experts_with_positive_expectancy"] == 1
+    assert diagnostics["experts_with_confident_positive_expectancy"] == 1
     assert diagnostics["days_to_pass_from_start"] == 3
+
+
+def test_expert_trade_metrics_reports_usage_direction_and_asset_balance():
+    trades = pd.DataFrame(
+        [
+            {"timestamp": "2026-01-01T10:00:00+00:00", "net_return_r": 0.5, "asset": "US100", "expert": "trend", "direction": 1, "risk_fraction": 0.009},
+            {"timestamp": "2026-01-01T11:00:00+00:00", "net_return_r": -0.25, "asset": "US500", "expert": "trend", "direction": -1, "risk_fraction": 0.007},
+            {"timestamp": "2026-01-02T10:00:00+00:00", "net_return_r": 0.25, "asset": "US500", "expert": "mean_reversion", "direction": -1, "risk_fraction": 0.008},
+        ]
+    )
+
+    metrics = expert_trade_metrics(trades)
+
+    assert [row["expert"] for row in metrics] == ["trend", "mean_reversion"]
+    assert metrics[0]["executed_trade_count"] == 2
+    assert round(metrics[0]["routed_usage_share"], 6) == round(2 / 3, 6)
+    assert metrics[0]["direction_long_share"] == 0.5
+    assert metrics[0]["direction_short_share"] == 0.5
+    assert metrics[0]["asset_us100_share"] == 0.5
+    assert metrics[0]["asset_us500_share"] == 0.5
+    assert "expectancy_ci_lower_r" in metrics[0]
 
 
 def test_discover_backtest_artifacts_prefers_split_directories():

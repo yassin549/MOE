@@ -17,6 +17,7 @@ from moe_trading.data.scaling import FeatureScaler
 from moe_trading.data.splitting import TimeSplit, generate_walk_forward_splits, make_time_split
 from moe_trading.evaluation.metrics import binary_classification_metrics
 from moe_trading.experiments.tracker import ExperimentTracker
+from moe_trading.labels.audit import generate_phase1_audit_artifacts
 from moe_trading.models.moe import MultiAssetMoE, save_model
 from moe_trading.pipeline import build_research_frame
 from moe_trading.policy.decision import ACCOUNT_FEATURE_NAMES, encode_account_state
@@ -24,6 +25,7 @@ from moe_trading.account.rules import PropRuleEngine
 from moe_trading.account.state import AccountState
 from moe_trading.training.losses import MultiTaskMoELoss
 from moe_trading.training.account_context import build_account_context_array
+from moe_trading.utils.io import save_json
 from moe_trading.utils.reproducibility import set_global_seed
 from moe_trading.utils.calibration import calibration_error, fit_platt_scaler, save_calibration_artifact
 
@@ -235,6 +237,8 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
     split_dir.mkdir(parents=True, exist_ok=True)
     model_path = split_dir / "model.pt"
     save_model(model, str(model_path))
+    scaler_path = split_dir / "scaler.json"
+    save_json({"feature_columns": feature_columns, **scaler.to_dict()}, scaler_path)
     calibration_path = split_dir / "calibration.json"
     save_calibration_artifact(calibration_artifact, calibration_path)
     tracker = ExperimentTracker(split_dir)
@@ -243,7 +247,7 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
         "history": history,
         "test_metrics": test_metrics,
         "model_path": str(model_path),
-        "scaler_path": str(split_dir / "scaler.json"),
+        "scaler_path": str(scaler_path),
         "calibration_path": str(calibration_path),
         "selection_score": best_val,
     }
@@ -467,6 +471,8 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
     bundle = build_research_frame(config)
     tracker = ExperimentTracker(config.experiment.output_dir)
     tracker.log_config(config)
+    phase1_audit = generate_phase1_audit_artifacts(bundle.frame, config, Path(config.experiment.output_dir) / "phase1_audit")
+    tracker.log_metrics("phase1_audit_summary", phase1_audit)
 
     if config.train.use_walk_forward:
         splits = generate_walk_forward_splits(
@@ -491,8 +497,10 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
         "num_splits": len(split_results),
         "split_test_metrics": [result["test_metrics"] for result in split_results],
         "model_paths": [result["model_path"] for result in split_results],
+        "scaler_paths": [result["scaler_path"] for result in split_results],
         "calibration_paths": [result["calibration_path"] for result in split_results],
         "selection_scores": [result["selection_score"] for result in split_results],
+        "phase1_audit": phase1_audit,
     }
     tracker.log_metrics("training_summary", summary)
     return summary
