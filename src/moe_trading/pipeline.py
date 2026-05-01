@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from moe_trading.config import AppConfig
 from moe_trading.data.loading import load_multi_asset_frame
 from moe_trading.data.schemas import MultiAssetFrame
 from moe_trading.features.engineering import build_feature_frame, collect_feature_columns
 from moe_trading.labels.generation import generate_labels
+from moe_trading.labels.audit import run_label_leakage_check
 from moe_trading.utils.cache import load_research_frame_cache, save_research_frame_cache
 
 
@@ -38,6 +41,12 @@ def build_research_frame(config: AppConfig) -> MultiAssetFrame:
     aligned = load_multi_asset_frame(config.data)
     feature_frame = build_feature_frame(aligned, config.features)
     labeled = generate_labels(feature_frame, config.labels, config.model.setup_names, config.backtest)
+    leakage_violations = run_label_leakage_check(labeled, config.model.setup_names)
+    if leakage_violations:
+        for violation in leakage_violations:
+            LOGGER.error("[leakage-check] %s", violation)
+        raise ValueError(f"Label leakage check failed with {len(leakage_violations)} violation(s).")
+    LOGGER.info("[leakage-check] passed with 0 timestamp violations")
     label_columns = [
         column
         for column in labeled.columns
@@ -47,3 +56,4 @@ def build_research_frame(config: AppConfig) -> MultiAssetFrame:
     if config.data.use_cache:
         save_research_frame_cache(bundle, config)
     return bundle
+LOGGER = logging.getLogger(__name__)

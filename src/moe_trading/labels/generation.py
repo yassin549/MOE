@@ -21,6 +21,8 @@ SETUP_DIRECTIONAL = {
     "exhaustion_failure": True,
 }
 
+LABEL_COST_MODEL = "round_trip_bps(spread+slippage+commission)"
+
 
 @dataclass(slots=True)
 class TradeOutcome:
@@ -189,6 +191,7 @@ def generate_labels(
             net_return_r_values = np.zeros(len(labeled), dtype=np.float32)
             mae_values = np.zeros(len(labeled), dtype=np.float32)
             resolution_values = np.zeros(len(labeled), dtype=np.float32)
+            horizon_values = np.full(len(labeled), label_config.max_holding_bars, dtype=np.int32)
 
             for idx in np.flatnonzero(condition):
                 stop_distance = max(float(atr[idx]) * label_config.stop_atr_multiple, 1e-6)
@@ -229,6 +232,10 @@ def generate_labels(
             mae_col = f"{prefix}_{setup}_mae_r"
             resolution_col = f"{prefix}_{setup}_resolution_bars"
             direction_col = f"{prefix}_{setup}_direction"
+            trigger_col = f"{prefix}_{setup}_trigger_bar_index"
+            earliest_tradable_col = f"{prefix}_{setup}_earliest_tradable_bar_index"
+            horizon_col = f"{prefix}_{setup}_outcome_horizon_bars"
+            cost_model_col = f"{prefix}_{setup}_cost_model"
 
             output_columns[present_col] = present_values
             output_columns[valid_col] = valid_values
@@ -239,6 +246,10 @@ def generate_labels(
             output_columns[mae_col] = mae_values
             output_columns[resolution_col] = resolution_values
             output_columns[direction_col] = direction
+            output_columns[trigger_col] = np.arange(len(labeled), dtype=np.int64)
+            output_columns[earliest_tradable_col] = np.arange(1, len(labeled) + 1, dtype=np.int64)
+            output_columns[horizon_col] = horizon_values
+            output_columns[cost_model_col] = np.full(len(labeled), LABEL_COST_MODEL, dtype=object)
             manager_targets[f"{prefix}_{setup}"] = tradable_values.astype(np.int64)
             per_setup_valids.append(valid_values)
             per_setup_returns.append(net_return_r_values)

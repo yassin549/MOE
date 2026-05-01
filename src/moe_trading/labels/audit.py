@@ -16,6 +16,30 @@ from moe_trading.utils.io import ensure_dir, save_json
 ASSETS = ("US100", "US500")
 
 
+def run_label_leakage_check(frame: pd.DataFrame, setup_names: list[str], assets: tuple[str, ...] = ASSETS) -> list[str]:
+    """Return a list of timestamp/ordering violations found in label metadata columns."""
+    violations: list[str] = []
+    for asset in assets:
+        prefix = asset.lower()
+        for setup in setup_names:
+            trigger_col = f"{prefix}_{setup}_trigger_bar_index"
+            earliest_col = f"{prefix}_{setup}_earliest_tradable_bar_index"
+            horizon_col = f"{prefix}_{setup}_outcome_horizon_bars"
+            present_col = f"{prefix}_{setup}_present"
+            if trigger_col not in frame.columns or earliest_col not in frame.columns or horizon_col not in frame.columns:
+                violations.append(f"missing metadata columns for {asset}/{setup}")
+                continue
+            mask = frame[present_col].astype(bool) if present_col in frame.columns else pd.Series(True, index=frame.index)
+            trigger_vals = frame.loc[mask, trigger_col].to_numpy(dtype=np.int64)
+            earliest_vals = frame.loc[mask, earliest_col].to_numpy(dtype=np.int64)
+            horizon_vals = frame.loc[mask, horizon_col].to_numpy(dtype=np.int64)
+            if np.any(earliest_vals <= trigger_vals):
+                violations.append(f"{asset}/{setup}: earliest tradable must be strictly after trigger")
+            if np.any(horizon_vals <= 0):
+                violations.append(f"{asset}/{setup}: outcome horizon must be positive")
+    return violations
+
+
 def _safe_mean(series: pd.Series) -> float:
     if series.empty:
         return 0.0
