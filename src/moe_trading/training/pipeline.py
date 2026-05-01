@@ -25,7 +25,7 @@ from moe_trading.account.state import AccountState
 from moe_trading.training.losses import MultiTaskMoELoss
 from moe_trading.training.account_context import build_account_context_array
 from moe_trading.utils.reproducibility import set_global_seed
-from moe_trading.utils.calibration import fit_platt_scaler, save_calibration_artifact
+from moe_trading.utils.calibration import calibration_error, fit_platt_scaler, save_calibration_artifact
 
 
 def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
@@ -228,6 +228,8 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
         model.load_state_dict(best_state)
 
     calibration_artifact = _fit_calibration_artifact(model, val_loader, device, config)
+    manager_calibration = _fit_manager_calibration_and_threshold(model, val_loader, device, config)
+    calibration_artifact["manager"] = manager_calibration
     test_metrics, _ = _run_epoch(model, test_loader, criterion, device)
     split_dir = output_dir / split_name
     split_dir.mkdir(parents=True, exist_ok=True)
@@ -306,6 +308,80 @@ def _fit_calibration_artifact(model: MultiAssetMoE, loader: DataLoader, device: 
         "setup_names": list(config.model.setup_names),
         "scales": scales,
         "biases": biases,
+    }
+
+
+def _fit_manager_calibration_and_threshold(
+    model: MultiAssetMoE,
+    loader: DataLoader,
+    device: torch.device,
+    config: AppConfig,
+) -> dict[str, object]:
+    logits_batches: list[torch.Tensor] = []
+    target_batches: list[torch.Tensor] = []
+    return_batches: list[torch.Tensor] = []
+    model.eval()
+    with torch.inference_mode():
+        for batch in loader:
+            batch = _to_device(batch, device)
+            output = model(
+                asset_sequences=batch["asset_sequences"],
+                cross_sequence=batch["cross_sequence"],
+                regime_sequence=batch["regime_sequence"],
+                manager_context=batch["manager_context"],
+                account_context=batch["account_context"],
+            )
+            logits_batches.append(output.manager_trade_logits.detach().cpu().reshape(-1))
+            target_batches.append(batch["manager_labels"][:, 0].detach().cpu().reshape(-1))
+            return_batches.append(batch["returns"].detach().cpu().reshape(-1))
+    if not logits_batches:
+        return {"method": config.train.calibration_method, "scale": 1.0, "bias": 0.0, "threshold": config.backtest.min_trade_probability}
+
+    logits = torch.cat(logits_batches, dim=0)
+    targets = torch.cat(target_batches, dim=0)
+    realized_returns = torch.cat(return_batches, dim=0)
+    raw_prob = torch.sigmoid(logits)
+    scale, bias = fit_platt_scaler(logits, targets, min_samples=config.train.calibration_min_samples)
+    cal_prob = torch.sigmoid((logits * scale) + bias)
+
+    threshold_grid = torch.linspace(0.05, 0.95, steps=37)
+    cost = (config.backtest.spread_bps + config.backtest.slippage_bps + config.backtest.commission_bps) / 10_000.0
+    best_threshold = float(config.backtest.min_trade_probability)
+    best_expectancy = float("-inf")
+    best_precision = 0.0
+    for threshold in threshold_grid:
+        mask = cal_prob >= threshold
+        if not torch.any(mask):
+            continue
+        precision = float(targets[mask].mean().item())
+        expectancy = float((realized_returns[mask] - cost).mean().item())
+        if expectancy > best_expectancy:
+            best_expectancy = expectancy
+            best_threshold = float(threshold.item())
+            best_precision = precision
+
+    def _metrics(prob: torch.Tensor, threshold: float) -> dict[str, float]:
+        mask = prob >= threshold
+        precision = float(targets[mask].mean().item()) if torch.any(mask) else 0.0
+        expectancy = float((realized_returns[mask] - cost).mean().item()) if torch.any(mask) else 0.0
+        brier = float(torch.mean((prob - targets) ** 2).item())
+        return {
+            "brier": brier,
+            "calibration_error": calibration_error(targets, prob),
+            "precision_at_threshold": precision,
+            "routed_expectancy_post_cost": expectancy,
+        }
+
+    return {
+        "method": config.train.calibration_method,
+        "scale": float(scale),
+        "bias": float(bias),
+        "threshold": best_threshold,
+        "selection_objective": "max_routed_expectancy_post_cost",
+        "metrics_pre": _metrics(raw_prob, float(config.backtest.min_trade_probability)),
+        "metrics_post": _metrics(cal_prob, best_threshold),
+        "selected_precision": best_precision,
+        "selected_expectancy_post_cost": best_expectancy,
     }
 
 
