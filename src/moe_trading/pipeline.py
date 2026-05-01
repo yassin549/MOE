@@ -6,7 +6,7 @@ from moe_trading.config import AppConfig
 from moe_trading.data.loading import load_multi_asset_frame
 from moe_trading.data.schemas import MultiAssetFrame
 from moe_trading.features.engineering import build_feature_frame, collect_feature_columns
-from moe_trading.labels.generation import generate_labels
+from moe_trading.labels.generation import generate_labels, run_label_leakage_checks
 from moe_trading.utils.cache import load_research_frame_cache, save_research_frame_cache
 
 
@@ -38,6 +38,12 @@ def build_research_frame(config: AppConfig) -> MultiAssetFrame:
     aligned = load_multi_asset_frame(config.data)
     feature_frame = build_feature_frame(aligned, config.features)
     labeled = generate_labels(feature_frame, config.labels, config.model.setup_names, config.backtest)
+    leakage_report = run_label_leakage_checks(labeled, config.model.setup_names, config.labels.max_holding_bars)
+    print(f"[dataset-build] label leakage check passed={leakage_report['passed']} violations={len(leakage_report['violations'])}")
+    for violation in leakage_report["violations"]:
+        print(f"[dataset-build] leakage violation: {violation}")
+    if not leakage_report["passed"]:
+        raise ValueError("Label leakage check failed; see dataset-build log violations.")
     label_columns = [
         column
         for column in labeled.columns
