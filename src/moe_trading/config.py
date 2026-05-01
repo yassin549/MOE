@@ -139,6 +139,9 @@ class BacktestConfig:
     target_trades_per_day_min: float = 2.0
     target_trades_per_day_max: float = 3.0
     exceptional_day_trade_cap: int = 4
+    min_routed_share_per_active_expert: float = 0.05
+    min_executed_trades_per_active_expert: int = 5
+    min_active_experts: int = 4
 
 
 @dataclass(slots=True)

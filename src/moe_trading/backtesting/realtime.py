@@ -573,7 +573,7 @@ def build_realtime_components(
     experiment_dir: str | Path | None = None,
     model_path: str | Path | None = None,
     scaler_path: str | Path | None = None,
-) -> tuple[CandleBatch, MoELiveModelAdapter, ReplayConfig]:
+) -> tuple[CandleBatch, MoELiveModelAdapter, ReplayConfig, pd.DataFrame]:
     bundle = build_feature_bundle(config)
     frame = bundle.frame.reset_index(drop=True)
     resolved_model_path = Path(model_path) if model_path is not None else resolve_model_checkpoint(experiment_dir or config.experiment.output_dir)
@@ -592,7 +592,7 @@ def build_realtime_components(
         allow_short=True,
         one_trade_per_asset=config.backtest.one_trade_per_asset,
     )
-    return candles, adapter, replay
+    return candles, adapter, replay, frame
 
 
 def run_realtime_backtest(
@@ -601,7 +601,7 @@ def run_realtime_backtest(
     model_path: str | Path | None = None,
     scaler_path: str | Path | None = None,
 ) -> SimulationResult:
-    candles, adapter, replay = build_realtime_components(
+    candles, adapter, replay, _ = build_realtime_components(
         config,
         experiment_dir=experiment_dir,
         model_path=model_path,

@@ -260,6 +260,42 @@ def backtest_diagnostics(
     }
 
 
+def routed_usage_gate(trades: pd.DataFrame, config: AppConfig) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    total = 0
+    if not trades.empty and "expert" in trades.columns:
+        counts = trades["expert"].fillna("unknown").astype(str).value_counts().astype(int).to_dict()
+        total = int(sum(counts.values()))
+    routed_share = {expert: (count / total if total else 0.0) for expert, count in counts.items()}
+    active_experts = sorted([expert for expert, count in counts.items() if count > 0])
+    min_share = float(config.backtest.min_routed_share_per_active_expert)
+    min_trades = int(config.backtest.min_executed_trades_per_active_expert)
+    min_active = int(config.backtest.min_active_experts)
+    checks = {
+        "minimum_active_experts": len(active_experts) >= min_active,
+        "minimum_routed_share_per_active_expert": all(share >= min_share for share in routed_share.values()) if total else False,
+        "minimum_executed_trade_count_per_active_expert": all(count >= min_trades for count in counts.values()) if total else False,
+    }
+    passed = all(checks.values())
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "thresholds": {
+            "min_routed_share_per_active_expert": min_share,
+            "min_executed_trades_per_active_expert": min_trades,
+            "min_active_experts": min_active,
+        },
+        "observed": {
+            "total_routed_trades": total,
+            "active_experts": len(active_experts),
+            "active_expert_names": active_experts,
+            "expert_trade_counts": counts,
+            "expert_routed_share": routed_share,
+        },
+        "checks": checks,
+    }
+
+
 def trade_metrics(trades: pd.DataFrame) -> dict[str, Any]:
     if trades.empty:
         return {
