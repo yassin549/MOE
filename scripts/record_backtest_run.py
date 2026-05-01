@@ -23,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-tag", default=None, help="Optional tag like 'baseline_pre_fix'.")
     parser.add_argument("--output-dir", default=None, help="Optional original output directory.")
     parser.add_argument("--model-path", default=None, help="Optional original model path.")
+    parser.add_argument("--allow-mixed-cost-model-versions", action="store_true", help="Allow appending to run sheet when cost-model versions differ.")
     return parser
 
 
@@ -42,10 +43,12 @@ if __name__ == "__main__":
             model_path=args.model_path,
             evaluation_start=args.evaluation_start,
             evaluation_end=args.evaluation_end,
+            asset_universe=["US100", "US500"],
+            config=config,
             baseline_tag=args.baseline_tag,
         ),
         **flatten_for_sheet(summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
     }
-    append_run_sheet(row, args.sheet_path)
+    append_run_sheet(row, args.sheet_path, allow_mixed_cost_model_versions=args.allow_mixed_cost_model_versions)
     print(json.dumps({"recorded": True, "sheet_path": args.sheet_path, "num_trades": int(summary["num_trades"])}, indent=2))

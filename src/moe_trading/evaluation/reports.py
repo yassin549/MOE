@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from moe_trading.cost_model import cost_model_stamp
 from moe_trading.utils.io import ensure_dir
 
 
@@ -30,12 +31,20 @@ def flatten_for_sheet(payload: dict[str, Any], prefix: str = "") -> dict[str, An
     return flat
 
 
-def append_run_sheet(row: dict[str, Any], path: str | Path) -> None:
+def append_run_sheet(row: dict[str, Any], path: str | Path, allow_mixed_cost_model_versions: bool = False) -> None:
     output_path = Path(path)
     ensure_dir(output_path.parent)
     frame = pd.DataFrame([row])
     if output_path.exists():
         existing = pd.read_csv(output_path)
+        if not allow_mixed_cost_model_versions and "cost_model_version" in existing.columns and "cost_model_version" in frame.columns:
+            existing_versions = {str(v) for v in existing["cost_model_version"].dropna().astype(str).unique()}
+            new_versions = {str(v) for v in frame["cost_model_version"].dropna().astype(str).unique()}
+            if existing_versions and new_versions and existing_versions != new_versions:
+                raise ValueError(
+                    f"Cross-run comparison blocked: run sheet has cost model versions {sorted(existing_versions)} but new row has {sorted(new_versions)}. "
+                    "Use allow_mixed_cost_model_versions=True (or CLI override) to append anyway."
+                )
         frame = pd.concat([existing, frame], ignore_index=True, sort=False)
     frame.to_csv(output_path, index=False)
 
@@ -47,9 +56,11 @@ def make_run_metadata(
     model_path: str | None,
     evaluation_start: str | None,
     evaluation_end: str | None,
+    asset_universe: list[str],
+    config: Any,
     baseline_tag: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    metadata = {
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "config_name": config_name,
         "experiment_name": experiment_name,
@@ -58,4 +69,7 @@ def make_run_metadata(
         "evaluation_start": evaluation_start,
         "evaluation_end": evaluation_end,
         "baseline_tag": baseline_tag,
+        "asset_universe": sorted(asset_universe),
     }
+    metadata.update(cost_model_stamp(config))
+    return metadata

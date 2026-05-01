@@ -15,6 +15,7 @@ import torch
 from moe_trading.account.rules import PropRuleEngine
 from moe_trading.account.state import AccountState
 from moe_trading.config import AppConfig
+from moe_trading.cost_model import build_cost_model_config
 from moe_trading.data.dataset import MultiAssetSequenceDataset, collate_sequence_samples
 from moe_trading.data.scaling import FeatureScaler
 from moe_trading.data.schemas import MultiAssetFrame
@@ -580,13 +581,14 @@ def build_realtime_components(
     resolved_scaler_path = Path(scaler_path) if scaler_path is not None else resolved_model_path.parent / "scaler.json"
     candles = load_realtime_candles(frame)
     adapter = MoELiveModelAdapter(config, bundle, resolved_model_path, resolved_scaler_path)
+    cost_model = build_cost_model_config(config)
     replay = ReplayConfig(
         sequence_length=config.data.sequence_length,
         max_open_positions=2 if config.backtest.allow_dual_asset_trades else 1,
         per_trade_risk_fraction=config.backtest.challenge_risk_fraction,
-        spread_bps=config.backtest.spread_bps,
-        slippage_bps=config.backtest.slippage_bps,
-        commission_bps=config.backtest.commission_bps,
+        spread_bps=cost_model.spread_bps,
+        slippage_bps=cost_model.slippage_bps,
+        commission_bps=cost_model.commission_bps,
         max_holding_bars=config.labels.max_holding_bars,
         allow_long=True,
         allow_short=True,

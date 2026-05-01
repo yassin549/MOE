@@ -7,7 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from moe_trading.config import BacktestConfig, LabelConfig
+from moe_trading.config import AppConfig, BacktestConfig, LabelConfig
+from moe_trading.cost_model import total_round_trip_bps
 
 
 SETUP_DIRECTIONAL = {
@@ -148,7 +149,8 @@ def _net_return_after_costs(
     stop_distance: float,
     backtest_config: BacktestConfig,
 ) -> float:
-    total_bps = 2.0 * (backtest_config.spread_bps + backtest_config.slippage_bps + backtest_config.commission_bps)
+    app_config = AppConfig(backtest=backtest_config)
+    total_bps = total_round_trip_bps(app_config)
     total_price_cost = entry_price * (total_bps / 10_000.0)
     return float(return_r - (total_price_cost / max(stop_distance, 1e-6)))
 

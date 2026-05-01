@@ -22,6 +22,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scaler-path", default=None, help="Optional direct scaler path.")
     parser.add_argument("--output-dir", default=str(ROOT / "artifacts" / "realtime_backtest"), help="Output directory.")
     parser.add_argument("--sheet-path", default=str(ROOT / "reports" / "backtest_run_sheet.csv"), help="CSV sheet updated after each run.")
+    parser.add_argument("--allow-mixed-cost-model-versions", action="store_true", help="Allow appending to run sheet when cost-model versions differ.")
     return parser
 
 
@@ -49,6 +50,8 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            asset_universe=["US100", "US500"],
+            config=config,
         ),
     }
 
@@ -68,12 +71,14 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            asset_universe=["US100", "US500"],
+            config=config,
         ),
         **flatten_for_sheet(result.summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
         **flatten_for_sheet(result.performance, "perf"),
     }
-    append_run_sheet(row, args.sheet_path)
+    append_run_sheet(row, args.sheet_path, allow_mixed_cost_model_versions=args.allow_mixed_cost_model_versions)
 
     print(
         "Realtime backtest complete: "
