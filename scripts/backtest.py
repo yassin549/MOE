@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from moe_trading.backtesting.realtime import RealtimeBacktestSimulator, build_realtime_components
 from moe_trading.config import load_config
+from moe_trading.cost_model import cost_model_metadata
 from moe_trading.evaluation.metrics import backtest_diagnostics
 from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 
@@ -22,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scaler-path", default=None, help="Optional direct scaler path.")
     parser.add_argument("--output-dir", default=str(ROOT / "artifacts" / "realtime_backtest"), help="Output directory.")
     parser.add_argument("--sheet-path", default=str(ROOT / "reports" / "backtest_run_sheet.csv"), help="CSV sheet updated after each run.")
+    parser.add_argument("--allow-cost-model-mismatch", action="store_true", help="Override cost-model guard when appending comparable runs.")
     return parser
 
 
@@ -38,6 +40,8 @@ if __name__ == "__main__":
     evaluation_start = str(candles.timestamp_str[0]) if len(candles.timestamp_str) else None
     evaluation_end = str(candles.timestamp_str[-1]) if len(candles.timestamp_str) else None
     diagnostics = backtest_diagnostics(result.trades_frame, config, evaluation_start, evaluation_end)
+    cost_meta = cost_model_metadata(config)
+    asset_universe = ",".join(sorted({str(a) for a in result.trades_frame.get("asset", [])})) if not result.trades_frame.empty and "asset" in result.trades_frame.columns else None
     detailed_metrics = {
         "summary": result.summary,
         "diagnostics": diagnostics,
@@ -49,6 +53,10 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            **cost_meta,
+            data_period_start=evaluation_start,
+            data_period_end=evaluation_end,
+            asset_universe=asset_universe,
         ),
     }
 
@@ -68,12 +76,16 @@ if __name__ == "__main__":
             model_path=str(args.model_path) if args.model_path is not None else None,
             evaluation_start=evaluation_start,
             evaluation_end=evaluation_end,
+            **cost_meta,
+            data_period_start=evaluation_start,
+            data_period_end=evaluation_end,
+            asset_universe=asset_universe,
         ),
         **flatten_for_sheet(result.summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
         **flatten_for_sheet(result.performance, "perf"),
     }
-    append_run_sheet(row, args.sheet_path)
+    append_run_sheet(row, args.sheet_path, allow_cost_model_mismatch=args.allow_cost_model_mismatch)
 
     print(
         "Realtime backtest complete: "
