@@ -57,6 +57,8 @@ class LabelConfig:
     sweep_wick_threshold: float = 0.45
     pullback_depth_atr: float = 0.8
     exhaustion_reversal_body_threshold: float = 0.2
+    expectancy_min_trades: int = 30
+    expectancy_confidence_level: float = 0.95
 
 
 @dataclass(slots=True)
@@ -107,6 +109,7 @@ class TrainConfig:
     diversity_weight: float = 0.05
     entropy_weight: float = 0.01
     gate_negative_weight: float = 0.25
+    direction_symmetry_min_share: float = 0.3
     use_dynamic_account_context: bool = True
     calibration_method: str = "platt"
     calibration_min_samples: int = 25

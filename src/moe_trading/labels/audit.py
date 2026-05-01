@@ -22,6 +22,30 @@ def _safe_mean(series: pd.Series) -> float:
     return float(series.mean())
 
 
+def _normal_z_for_confidence(confidence_level: float) -> float:
+    if confidence_level >= 0.99:
+        return 2.576
+    if confidence_level >= 0.95:
+        return 1.96
+    if confidence_level >= 0.90:
+        return 1.645
+    return 1.282
+
+
+def _expectancy_confidence_interval(series: pd.Series, confidence_level: float) -> tuple[float, float]:
+    if series.empty:
+        return 0.0, 0.0
+    values = series.to_numpy(dtype=np.float64)
+    mean = float(values.mean())
+    if values.size <= 1:
+        return mean, mean
+    std = float(values.std(ddof=1))
+    stderr = std / np.sqrt(values.size)
+    z = _normal_z_for_confidence(confidence_level)
+    margin = z * stderr
+    return mean - margin, mean + margin
+
+
 def _direction_balance(direction: pd.Series) -> dict[str, float]:
     if direction.empty:
         return {
@@ -47,6 +71,8 @@ def compute_label_audit_table(
     rows: list[dict[str, Any]] = []
     threshold = float(config.train.direction_symmetry_min_share)
     min_edge_r = float(config.labels.min_manager_edge_r)
+    min_expectancy_trades = int(config.labels.expectancy_min_trades)
+    confidence_level = float(config.labels.expectancy_confidence_level)
 
     for asset in assets:
         prefix = asset.lower()
@@ -70,6 +96,7 @@ def compute_label_audit_table(
             net_returns = frame.loc[present_mask, net_return_col]
             valid_net_returns = frame.loc[valid_mask, net_return_col]
             positive_net_rate = float((valid_net_returns > 0).mean()) if valid_mask.any() else 0.0
+            expectancy_ci_lower, expectancy_ci_upper = _expectancy_confidence_interval(net_returns, confidence_level)
             balance = _direction_balance(direction)
             min_side_share = min(balance["long_share"], balance["short_share"])
 
@@ -93,7 +120,10 @@ def compute_label_audit_table(
                     "direction_symmetry_pass": (not SETUP_DIRECTIONAL.get(setup, True)) or (min_side_share >= threshold),
                     "raw_heuristic_expectancy_r": _safe_mean(raw_returns),
                     "post_cost_expectancy_r": _safe_mean(net_returns),
+                    "expectancy_ci_lower_r": expectancy_ci_lower,
+                    "expectancy_ci_upper_r": expectancy_ci_upper,
                     "valid_post_cost_expectancy_r": _safe_mean(valid_net_returns),
+                    "expectancy_min_trades": min_expectancy_trades,
                     "tradable_share_of_present": float(tradable_mask.sum() / max(present_mask.sum(), 1)),
                     "mean_manager_edge_threshold_r": min_edge_r,
                 }
@@ -110,6 +140,12 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
                 "trades",
                 "win_rate",
                 "expectancy_r",
+                "expectancy_ci_lower_r",
+                "expectancy_ci_upper_r",
+                "expectancy_min_trades",
+                "expectancy_evaluable",
+                "expectancy_data_state",
+                "expectancy_significant",
                 "profitability_gate_pass",
                 "long_share",
                 "short_share",
@@ -122,6 +158,9 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
             "setup_present_count",
             "positive_net_rate",
             "post_cost_expectancy_r",
+            "expectancy_ci_lower_r",
+            "expectancy_ci_upper_r",
+            "expectancy_min_trades",
             "direction_long_share",
             "direction_short_share",
         ]
@@ -135,7 +174,15 @@ def compute_heuristic_baseline_table(label_audit: pd.DataFrame) -> pd.DataFrame:
             "direction_short_share": "short_share",
         }
     )
-    baseline["profitability_gate_pass"] = baseline["expectancy_r"] > 0.0
+    baseline["expectancy_min_trades"] = baseline["expectancy_min_trades"].astype(int)
+    baseline["expectancy_evaluable"] = baseline["trades"] >= baseline["expectancy_min_trades"]
+    baseline["expectancy_data_state"] = np.where(baseline["expectancy_evaluable"], "evaluable", "not_enough_data")
+    baseline["expectancy_significant"] = baseline["expectancy_evaluable"] & (baseline["expectancy_ci_lower_r"] >= 0.0)
+    baseline["profitability_gate_pass"] = (
+        baseline["expectancy_evaluable"]
+        & (baseline["expectancy_r"] > 0.0)
+        & (baseline["expectancy_ci_lower_r"] >= 0.0)
+    )
     return baseline
 
 
