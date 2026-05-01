@@ -1,5 +1,6 @@
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 import sys
 
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from moe_trading.config import load_config
+from moe_trading.experiments.scheduler import ExpertCompletionCriteria, ExpertSchedulerConfig, expert_status_report
+from moe_trading.utils.io import save_json
 from moe_trading.evaluation.metrics import backtest_diagnostics, trade_metrics
 from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 
@@ -34,6 +37,16 @@ if __name__ == "__main__":
         trades["risk_fraction"] = float(config.backtest.challenge_risk_fraction)
     summary = trade_metrics(trades)
     diagnostics = backtest_diagnostics(trades, config, args.evaluation_start, args.evaluation_end)
+    scheduler_cfg = ExpertSchedulerConfig(
+        expert_priority=list(config.experiment.scheduler.expert_priority),
+        completion=ExpertCompletionCriteria(
+            minimum_trade_count=int(config.experiment.scheduler.completion.minimum_trade_count),
+            minimum_post_cost_expectancy_r=float(config.experiment.scheduler.completion.minimum_post_cost_expectancy_r),
+            max_drawdown_floor_r=float(config.experiment.scheduler.completion.max_drawdown_floor_r),
+        ),
+    )
+    expert_status = expert_status_report(trades, scheduler_cfg)
+
     row = {
         **make_run_metadata(
             config_name=str(args.config),
@@ -47,5 +60,9 @@ if __name__ == "__main__":
         **flatten_for_sheet(summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
     }
+    for idx, item in enumerate(expert_status):
+        row.update(flatten_for_sheet(item, f"expert_status_{idx:02d}"))
     append_run_sheet(row, args.sheet_path)
-    print(json.dumps({"recorded": True, "sheet_path": args.sheet_path, "num_trades": int(summary["num_trades"])}, indent=2))
+    artifact_path = Path(args.output_dir or Path(args.trades).parent) / "expert_experiment_status.json"
+    save_json({"scheduler": asdict(scheduler_cfg), "experts": expert_status}, artifact_path)
+    print(json.dumps({"recorded": True, "sheet_path": args.sheet_path, "num_trades": int(summary["num_trades"]), "expert_status_path": str(artifact_path)}, indent=2))

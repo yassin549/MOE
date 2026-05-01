@@ -187,11 +187,38 @@ class PropConfig:
     challenge_fee_refund_multiple: float = 2.0
 
 
+
+
+@dataclass(slots=True)
+class ExpertCompletionCriteriaConfig:
+    minimum_trade_count: int = 30
+    minimum_post_cost_expectancy_r: float = 0.0
+    max_drawdown_floor_r: float = -5.0
+
+
+@dataclass(slots=True)
+class ExpertSchedulerConfig:
+    expert_priority: list[str] = field(
+        default_factory=lambda: [
+            "liquidity_sweep_reversal",
+            "trend_continuation",
+            "pullback_continuation",
+            "breakout_expansion",
+            "mean_reversion",
+            "volatility_compression_expansion",
+            "session_open_momentum",
+            "exhaustion_failure",
+        ]
+    )
+    completion: ExpertCompletionCriteriaConfig = field(default_factory=ExpertCompletionCriteriaConfig)
+
+
 @dataclass(slots=True)
 class ExperimentConfig:
     name: str = "us100_us500_moe"
     output_dir: str = "artifacts/experiments/default"
     notes: str = "Baseline research-grade multi-asset MoE."
+    scheduler: ExpertSchedulerConfig = field(default_factory=ExpertSchedulerConfig)
 
 
 @dataclass(slots=True)
