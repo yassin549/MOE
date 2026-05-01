@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -142,6 +143,69 @@ def _direction_for_setup(frame: pd.DataFrame, asset: str) -> dict[str, pd.Series
     }
 
 
+
+
+def _required_setup_columns(asset: str) -> list[str]:
+    prefix = asset.lower()
+    return [
+        f"{prefix}_lower_wick",
+        f"{prefix}_upper_wick",
+        f"{prefix}_compression_20",
+        f"{prefix}_slope_15",
+        f"{prefix}_momentum_10",
+        f"{prefix}_distance_high_20",
+        f"{prefix}_atr_15",
+        f"{prefix}_body",
+        f"{prefix}_volume_z_15",
+        f"{prefix}_range",
+        f"{prefix}_outside_bar",
+        "trend_agreement",
+        "spread_return_diff",
+        "spread_z_20",
+        "divergent_regime",
+        "joint_volatility",
+        "is_session_open_window",
+    ]
+
+
+def _setup_input_available_mask(frame: pd.DataFrame, asset: str) -> np.ndarray:
+    required = [c for c in _required_setup_columns(asset) if c in frame.columns]
+    if not required:
+        return np.zeros(len(frame), dtype=bool)
+    return frame[required].notna().all(axis=1).to_numpy()
+
+
+def run_label_leakage_checks(frame: pd.DataFrame, setup_names: list[str], max_holding_bars: int) -> dict[str, Any]:
+    violations: list[str] = []
+    for asset in ("us100", "us500"):
+        for setup in setup_names:
+            present_col = f"{asset}_{setup}_present"
+            trigger_col = f"{asset}_{setup}_trigger_timestamp"
+            tradable_col = f"{asset}_{setup}_earliest_tradable_timestamp"
+            horizon_col = f"{asset}_{setup}_outcome_horizon_bars"
+            availability_col = f"{asset}_{setup}_setup_inputs_available"
+            if present_col not in frame.columns:
+                continue
+            present = frame[present_col].astype(bool)
+            if availability_col in frame.columns and (present & ~frame[availability_col].astype(bool)).any():
+                violations.append(f"{asset}:{setup}:present_without_trigger_time_inputs")
+            if trigger_col in frame.columns and tradable_col in frame.columns:
+                trigger_ts = pd.to_datetime(frame[trigger_col], utc=True, errors="coerce")
+                tradable_ts = pd.to_datetime(frame[tradable_col], utc=True, errors="coerce")
+                bad_order = present & (tradable_ts <= trigger_ts)
+                if bad_order.any():
+                    violations.append(f"{asset}:{setup}:earliest_tradable_not_after_trigger")
+            if horizon_col in frame.columns and present.any():
+                invalid_horizon = present & (frame[horizon_col].astype(float) <= 0)
+                if invalid_horizon.any():
+                    violations.append(f"{asset}:{setup}:non_positive_outcome_horizon")
+            resolution_col = f"{asset}_{setup}_resolution_bars"
+            if resolution_col in frame.columns and present.any():
+                overflow = present & (frame[resolution_col].astype(float) > float(max_holding_bars))
+                if overflow.any():
+                    violations.append(f"{asset}:{setup}:resolution_exceeds_horizon")
+    return {"passed": not violations, "violations": violations}
+
 def _net_return_after_costs(
     return_r: float,
     entry_price: float,
@@ -165,6 +229,8 @@ def generate_labels(
     output_columns: dict[str, np.ndarray | pd.Series] = {}
     manager_targets: dict[str, np.ndarray] = {}
 
+    timestamp_series = labeled["timestamp"].astype(str) if "timestamp" in labeled.columns else pd.Series(labeled.index.astype(str), index=labeled.index)
+
     for asset in ("US100", "US500"):
         prefix = asset.lower()
         setup_conditions = _setup_condition(labeled, asset, label_config)
@@ -179,7 +245,9 @@ def generate_labels(
         atr = labeled[f"{prefix}_atr_15"].to_numpy()
 
         for setup in setup_names:
-            condition = setup_conditions[setup].fillna(False).to_numpy()
+            input_available = _setup_input_available_mask(labeled, asset)
+            condition = setup_conditions[setup].fillna(False).to_numpy() & input_available
+            condition[-1] = False
             direction = pd.Series(directions[setup], index=labeled.index).fillna(1).astype(int).to_numpy()
             present_values = condition.astype(np.int64)
             valid_values = np.zeros(len(labeled), dtype=np.int64)
@@ -229,6 +297,11 @@ def generate_labels(
             mae_col = f"{prefix}_{setup}_mae_r"
             resolution_col = f"{prefix}_{setup}_resolution_bars"
             direction_col = f"{prefix}_{setup}_direction"
+            trigger_col = f"{prefix}_{setup}_trigger_timestamp"
+            earliest_tradable_col = f"{prefix}_{setup}_earliest_tradable_timestamp"
+            horizon_col = f"{prefix}_{setup}_outcome_horizon_bars"
+            cost_col = f"{prefix}_{setup}_cost_model"
+            setup_input_col = f"{prefix}_{setup}_setup_inputs_available"
 
             output_columns[present_col] = present_values
             output_columns[valid_col] = valid_values
@@ -239,6 +312,11 @@ def generate_labels(
             output_columns[mae_col] = mae_values
             output_columns[resolution_col] = resolution_values
             output_columns[direction_col] = direction
+            output_columns[trigger_col] = timestamp_series.to_numpy()
+            output_columns[earliest_tradable_col] = timestamp_series.shift(-1).fillna(timestamp_series).to_numpy()
+            output_columns[horizon_col] = np.full(len(labeled), label_config.max_holding_bars, dtype=np.int64)
+            output_columns[cost_col] = np.full(len(labeled), "round_trip_bps_spread_slippage_commission", dtype=object)
+            output_columns[setup_input_col] = input_available.astype(np.int64)
             manager_targets[f"{prefix}_{setup}"] = tradable_values.astype(np.int64)
             per_setup_valids.append(valid_values)
             per_setup_returns.append(net_return_r_values)
