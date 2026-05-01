@@ -4,13 +4,16 @@ from pathlib import Path
 import sys
 
 import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from moe_trading.backtesting.realtime import RealtimeBacktestSimulator, build_realtime_components
 from moe_trading.config import load_config
+from moe_trading.data.splitting import make_time_split
 from moe_trading.evaluation.metrics import backtest_diagnostics
+from moe_trading.evaluation.metrics import routed_usage_gate, trade_metrics
 from moe_trading.evaluation.reports import append_run_sheet, flatten_for_sheet, make_run_metadata
 
 
@@ -28,7 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_parser().parse_args()
     config = load_config(args.config)
-    candles, adapter, replay = build_realtime_components(
+    candles, adapter, replay, frame = build_realtime_components(
         config,
         experiment_dir=args.experiment_dir,
         model_path=args.model_path,
@@ -38,9 +41,33 @@ if __name__ == "__main__":
     evaluation_start = str(candles.timestamp_str[0]) if len(candles.timestamp_str) else None
     evaluation_end = str(candles.timestamp_str[-1]) if len(candles.timestamp_str) else None
     diagnostics = backtest_diagnostics(result.trades_frame, config, evaluation_start, evaluation_end)
+    split = make_time_split(frame, config.data.validation_ratio, config.data.test_ratio, config.data.embargo_bars)
+
+    def _split_metrics(partition_name: str, partition_frame) -> dict:
+        if result.trades_frame.empty:
+            part_trades = result.trades_frame.copy()
+        else:
+            start_ts = partition_frame["timestamp"].iloc[0]
+            end_ts = partition_frame["timestamp"].iloc[-1]
+            trade_ts = pd.to_datetime(result.trades_frame["timestamp"], utc=True, errors="coerce").to_numpy()
+            mask = (trade_ts >= np.datetime64(start_ts)) & (trade_ts <= np.datetime64(end_ts))
+            part_trades = result.trades_frame.loc[mask]
+        return {
+            "trade_metrics": trade_metrics(part_trades),
+            "routed_usage_gate": routed_usage_gate(part_trades, config),
+        }
+
+    split_breakdown = {
+        "train": _split_metrics("train", split.train),
+        "validation": _split_metrics("validation", split.validation),
+        "test": _split_metrics("test", split.test),
+    }
+    routed_gate = routed_usage_gate(result.trades_frame, config)
     detailed_metrics = {
         "summary": result.summary,
         "diagnostics": diagnostics,
+        "routed_usage_gate": routed_gate,
+        "split_breakdown": split_breakdown,
         "performance": result.performance,
         "metadata": make_run_metadata(
             config_name=str(args.config),
@@ -71,6 +98,7 @@ if __name__ == "__main__":
         ),
         **flatten_for_sheet(result.summary, "summary"),
         **flatten_for_sheet(diagnostics, "diag"),
+        **flatten_for_sheet(routed_gate, "gate"),
         **flatten_for_sheet(result.performance, "perf"),
     }
     append_run_sheet(row, args.sheet_path)
