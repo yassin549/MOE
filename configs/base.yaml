@@ -1,0 +1,29 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 150000
+  sequence_length: 128
+  prediction_horizon: 30
+  embargo_bars: 60
+
+train:
+  batch_size: 128
+  lr: 0.001
+  max_epochs: 10
+  early_stopping_patience: 4
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 90000
+  walk_forward_validation_bars: 20000
+  walk_forward_test_bars: 20000
+  walk_forward_step_bars: 20000
+
+backtest:
+  min_trade_probability: 0.58
+  min_context_score: 0.52
+
+experiment:
+  name: baseline_moe
+  output_dir: artifacts/experiments/baseline_moe

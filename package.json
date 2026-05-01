@@ -1,0 +1,9 @@
+{
+  "name": "moe-dukascopy-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dukascopy data download, enrichment, cleaning, and analysis pipeline for US100 and US500.",
+  "scripts": {
+    "pipeline": "node scripts/dukascopy_pipeline.js"
+  }
+}

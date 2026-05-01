@@ -1,0 +1,50 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 6000
+  sequence_length: 128
+  prediction_horizon: 30
+  embargo_bars: 45
+  use_cache: true
+  cache_dir: artifacts/cache/research_frames
+
+model:
+  hidden_dim: 32
+  shared_dim: 32
+  expert_dim: 32
+  manager_dim: 32
+  num_tcn_layers: 2
+  kernel_size: 3
+  dropout: 0.1
+  calibration_dim: 16
+
+train:
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.0003
+  max_epochs: 2
+  early_stopping_patience: 2
+  gradient_clip_norm: 0.75
+  class_positive_weight: 2.0
+  manager_positive_weight: 3.0
+  calibration_weight: 0.15
+  regression_weight: 0.05
+  diversity_weight: 0.03
+  entropy_weight: 0.005
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 2600
+  walk_forward_validation_bars: 700
+  walk_forward_test_bars: 700
+  walk_forward_step_bars: 700
+
+backtest:
+  min_trade_probability: 0.58
+  min_context_score: 0.52
+
+experiment:
+  name: dev_quality
+  output_dir: artifacts/experiments/dev_quality
+  notes: Higher-signal capped profile for model-quality iteration.

@@ -1,0 +1,40 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 4000
+  sequence_length: 96
+  prediction_horizon: 30
+  embargo_bars: 45
+
+model:
+  hidden_dim: 16
+  shared_dim: 16
+  expert_dim: 16
+  manager_dim: 16
+  num_tcn_layers: 2
+  kernel_size: 3
+  dropout: 0.1
+  calibration_dim: 8
+
+train:
+  batch_size: 16
+  lr: 0.001
+  max_epochs: 1
+  early_stopping_patience: 1
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 1800
+  walk_forward_validation_bars: 500
+  walk_forward_test_bars: 500
+  walk_forward_step_bars: 500
+
+backtest:
+  min_trade_probability: 0.58
+  min_context_score: 0.52
+
+experiment:
+  name: dev_loop
+  output_dir: artifacts/experiments/dev_loop
+  notes: Small-model, small-data CPU development profile for fast iteration.

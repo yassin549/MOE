@@ -1,0 +1,88 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 6000
+  sequence_length: 128
+  prediction_horizon: 30
+  embargo_bars: 45
+  use_cache: true
+  cache_dir: artifacts/cache/research_frames
+
+model:
+  hidden_dim: 32
+  shared_dim: 32
+  expert_dim: 32
+  manager_dim: 32
+  num_tcn_layers: 2
+  kernel_size: 3
+  dropout: 0.1
+  calibration_dim: 16
+
+train:
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.0003
+  max_epochs: 2
+  early_stopping_patience: 2
+  gradient_clip_norm: 0.75
+  class_positive_weight: 2.0
+  manager_positive_weight: 3.0
+  manager_false_positive_weight: 1.65
+  calibration_weight: 0.15
+  regression_weight: 0.05
+  direction_loss_weight: 0.35
+  direction_auto_balance: true
+  diversity_weight: 0.03
+  entropy_weight: 0.005
+  gate_balance_weight: 0.08
+  gate_target_usage:
+    trend_continuation: 0.12
+    pullback_continuation: 0.20
+    breakout_expansion: 0.14
+    mean_reversion: 0.12
+    liquidity_sweep_reversal: 0.12
+    volatility_compression_expansion: 0.10
+    session_open_momentum: 0.10
+    exhaustion_failure: 0.10
+  expert_loss_weights:
+    trend_continuation: 0.80
+    pullback_continuation: 1.30
+    breakout_expansion: 1.00
+    mean_reversion: 1.10
+    liquidity_sweep_reversal: 1.05
+    volatility_compression_expansion: 1.05
+    session_open_momentum: 1.05
+    exhaustion_failure: 1.05
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 2600
+  walk_forward_validation_bars: 700
+  walk_forward_test_bars: 700
+  walk_forward_step_bars: 700
+
+backtest:
+  min_trade_probability: 0.48
+  min_context_score: 0.44
+  expert_min_trade_probability:
+    trend_continuation: 0.55
+    pullback_continuation: 0.50
+    breakout_expansion: 0.52
+    mean_reversion: 0.51
+    liquidity_sweep_reversal: 0.51
+    volatility_compression_expansion: 0.51
+    session_open_momentum: 0.51
+    exhaustion_failure: 0.51
+  challenge_risk_fraction: 0.009
+  funded_risk_fraction: 0.005
+  min_risk_fraction: 0.001
+  max_risk_multiplier: 1.15
+  target_trades_per_day_min: 2.0
+  target_trades_per_day_max: 3.0
+  exceptional_day_trade_cap: 4
+
+experiment:
+  name: capped_15min
+  output_dir: artifacts/experiments/capped_15min
+  notes: Capped CPU diagnostic profile intended for roughly 15-minute train/backtest iteration with informative manager/expert routing logs.

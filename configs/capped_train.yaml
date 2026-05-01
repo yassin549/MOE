@@ -1,0 +1,30 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 25000
+  sequence_length: 128
+  prediction_horizon: 30
+  embargo_bars: 60
+
+train:
+  batch_size: 64
+  lr: 0.001
+  max_epochs: 2
+  early_stopping_patience: 2
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 12000
+  walk_forward_validation_bars: 3000
+  walk_forward_test_bars: 3000
+  walk_forward_step_bars: 3000
+
+backtest:
+  min_trade_probability: 0.58
+  min_context_score: 0.52
+
+experiment:
+  name: capped_train
+  output_dir: artifacts/experiments/capped_train
+  notes: Fast capped walk-forward training profile for iterative model development.

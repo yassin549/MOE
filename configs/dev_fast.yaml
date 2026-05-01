@@ -1,0 +1,30 @@
+data:
+  us100_file: data/processed/US100_m1_clean.csv
+  us500_file: data/processed/US500_m1_clean.csv
+  aligned_dir: data/aligned
+  artifact_dir: artifacts
+  max_rows: 6000
+  sequence_length: 128
+  prediction_horizon: 30
+  embargo_bars: 60
+
+train:
+  batch_size: 32
+  lr: 0.001
+  max_epochs: 1
+  early_stopping_patience: 1
+  device: cpu
+  use_walk_forward: true
+  walk_forward_train_bars: 2500
+  walk_forward_validation_bars: 750
+  walk_forward_test_bars: 750
+  walk_forward_step_bars: 750
+
+backtest:
+  min_trade_probability: 0.58
+  min_context_score: 0.52
+
+experiment:
+  name: dev_fast
+  output_dir: artifacts/experiments/dev_fast
+  notes: Aggressively capped CPU-only development profile for rapid iteration.
