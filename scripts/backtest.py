@@ -49,10 +49,10 @@ if __name__ == "__main__":
         if result.trades_frame.empty:
             part_trades = result.trades_frame.copy()
         else:
-            start_ts = partition_frame["timestamp"].iloc[0]
-            end_ts = partition_frame["timestamp"].iloc[-1]
-            trade_ts = pd.to_datetime(result.trades_frame["timestamp"], utc=True, errors="coerce").to_numpy()
-            mask = (trade_ts >= np.datetime64(start_ts)) & (trade_ts <= np.datetime64(end_ts))
+            start_ts = pd.Timestamp(partition_frame["timestamp"].iloc[0]).tz_convert("UTC")
+            end_ts = pd.Timestamp(partition_frame["timestamp"].iloc[-1]).tz_convert("UTC")
+            trade_ts = pd.to_datetime(result.trades_frame["timestamp"], utc=True, errors="coerce")
+            mask = (trade_ts >= start_ts) & (trade_ts <= end_ts)
             part_trades = result.trades_frame.loc[mask]
         return {
             "trade_metrics": trade_metrics(part_trades),

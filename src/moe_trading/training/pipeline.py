@@ -280,7 +280,7 @@ def _calibration_error(y_true: np.ndarray, y_prob: np.ndarray, bins: int = 10) -
     return float(ece)
 
 
-def _fit_manager_calibration_and_threshold(
+def _fit_manager_calibration_from_arrays(
     y_prob: np.ndarray,
     y_true: np.ndarray,
     realized_returns: np.ndarray,
@@ -373,7 +373,7 @@ def _fit_calibration_artifact(model: MultiAssetMoE, loader: DataLoader, device: 
             asset_biases.append(bias)
         scales.append(asset_scales)
         biases.append(asset_biases)
-    manager_calibration, threshold, manager_metrics = _fit_manager_calibration_and_threshold(
+    manager_calibration, threshold, manager_metrics = _fit_manager_calibration_from_arrays(
         np.concatenate(manager_prob_batches) if manager_prob_batches else np.array([], dtype=np.float32),
         np.concatenate(manager_target_batches) if manager_target_batches else np.array([], dtype=np.float32),
         np.concatenate(manager_return_batches) if manager_return_batches else np.array([], dtype=np.float32),
@@ -413,7 +413,9 @@ def _fit_manager_calibration_and_threshold(
             )
             logits_batches.append(output.manager_trade_logits.detach().cpu().reshape(-1))
             target_batches.append(batch["manager_labels"][:, 0].detach().cpu().reshape(-1))
-            return_batches.append(batch["returns"].detach().cpu().reshape(-1))
+            # Collapse per-asset/per-expert returns to one realized-return proxy per sample
+            # so threshold selection is aligned with one manager trade probability per sample.
+            return_batches.append(batch["returns"].amax(dim=(1, 2)).detach().cpu().reshape(-1))
     if not logits_batches:
         return {"method": config.train.calibration_method, "scale": 1.0, "bias": 0.0, "threshold": config.backtest.min_trade_probability}
 

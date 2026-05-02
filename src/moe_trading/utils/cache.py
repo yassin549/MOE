@@ -15,7 +15,7 @@ from moe_trading.data.schemas import MultiAssetFrame
 from moe_trading.utils.io import ensure_dir
 
 
-PIPELINE_CACHE_VERSION = "v4"
+PIPELINE_CACHE_VERSION = "v6"
 
 
 def _source_metadata(path: str | Path) -> dict[str, Any]:

@@ -13,6 +13,41 @@ from moe_trading.config import FeatureConfig
 
 ASSET_PREFIXES = ("us100", "us500")
 
+CURATED_ASSET_FEATURE_SUFFIXES = [
+    "return_1",
+    "range",
+    "body",
+    "upper_wick",
+    "lower_wick",
+    "volatility_15",
+    "atr_15",
+    "momentum_5",
+    "momentum_15",
+    "distance_high_20",
+    "distance_low_20",
+    "slope_15",
+    "swing_position_20",
+    "compression_20",
+]
+
+CURATED_CROSS_FEATURES = [
+    "minute_sin",
+    "minute_cos",
+    "is_session_open_window",
+    "spread_return_diff",
+    "relative_strength_15",
+    "corr_30",
+    "spread_z_20",
+    "divergence_flag",
+]
+
+CURATED_REGIME_FEATURES = [
+    "joint_volatility",
+    "volatility_ratio",
+    "trend_agreement",
+    "divergent_regime",
+]
+
 
 def _safe_div(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     result = numerator / denominator.replace(0, np.nan)
@@ -175,53 +210,27 @@ def build_feature_frame(aligned: pd.DataFrame, feature_config: FeatureConfig) ->
 
 
 def collect_feature_columns(frame: pd.DataFrame) -> tuple[dict[str, list[str]], list[str], list[str]]:
-    """Split engineered feature columns into asset, cross-asset, and regime groups."""
-    asset_columns: dict[str, list[str]] = {"US100": [], "US500": []}
-    cross_columns: list[str] = []
-    regime_columns: list[str] = []
-
-    for column in frame.columns:
-        if not is_numeric_dtype(frame[column]):
-            continue
-        if (
-            "_target" in column
-            or "_valid" in column
-            or "_return_r" in column
-            or "_net_return_r" in column
-            or "_mae_r" in column
-            or "_resolution_bars" in column
-            or "_direction" in column
-            or "_manager_" in column
-            or column.startswith("manager_")
-        ):
-            continue
-        if column.startswith("us100_") and column not in {
-            "us100_timestamp_utc",
-            "us100_asset",
-            "us100_symbol",
-            "us100_instrument_id",
-        }:
-            asset_columns["US100"].append(column)
-        elif column.startswith("us500_") and column not in {
-            "us500_timestamp_utc",
-            "us500_asset",
-            "us500_symbol",
-            "us500_instrument_id",
-        }:
-            asset_columns["US500"].append(column)
-        elif column in {"joint_volatility", "volatility_ratio", "trend_agreement", "risk_on_regime", "divergent_regime", "high_vol_regime"}:
-            regime_columns.append(column)
-        elif column not in {
-            "timestamp",
-            "bar_index",
-            "us100_symbol",
-            "us500_symbol",
-            "us100_instrument_id",
-            "us500_instrument_id",
-            "us100_session_utc",
-            "us500_session_utc",
-            "us100_asset",
-            "us500_asset",
-        }:
-            cross_columns.append(column)
+    """Select the fixed model-input feature schema used for training and inference."""
+    asset_columns = {
+        "US100": [
+            f"us100_{suffix}"
+            for suffix in CURATED_ASSET_FEATURE_SUFFIXES
+            if f"us100_{suffix}" in frame.columns and is_numeric_dtype(frame[f"us100_{suffix}"])
+        ],
+        "US500": [
+            f"us500_{suffix}"
+            for suffix in CURATED_ASSET_FEATURE_SUFFIXES
+            if f"us500_{suffix}" in frame.columns and is_numeric_dtype(frame[f"us500_{suffix}"])
+        ],
+    }
+    cross_columns = [
+        column
+        for column in CURATED_CROSS_FEATURES
+        if column in frame.columns and is_numeric_dtype(frame[column])
+    ]
+    regime_columns = [
+        column
+        for column in CURATED_REGIME_FEATURES
+        if column in frame.columns and is_numeric_dtype(frame[column])
+    ]
     return asset_columns, cross_columns, regime_columns

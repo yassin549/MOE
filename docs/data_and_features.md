@@ -56,70 +56,55 @@ The feature pipeline builds three groups:
 2. Asset-specific features for US500.
 3. Cross-asset and regime features shared by experts and manager.
 
-Only numeric columns are passed into the model. Raw string fields such as month names or session labels are excluded.
+The builder still computes a wider research frame for labeling and diagnostics, but the model now consumes a fixed curated subset of 40 features:
+
+- 14 asset features for US100
+- 14 asset features for US500
+- 8 cross/session features
+- 4 regime features
+
+This avoids training on every numeric column in the frame and keeps the live/training schema compact and stable.
 
 ## Asset Features
 
-For each asset prefix `us100_` and `us500_`, the pipeline creates:
+For each asset prefix `us100_` and `us500_`, the model consumes these 14 curated features:
 
-- simple return
-- log return
-- normalized candle range
-- normalized candle body
-- upper wick ratio
-- lower wick ratio
-- true range
-- directional sign
-- rolling volatility
-- ATR-style rolling true range
-- rolling mean range
-- volume z-scores when volume is enabled
-- momentum over multiple windows
-- distance from rolling highs and lows
-- rolling slope
-- swing position inside rolling high/low envelopes
-- compression ratio
-- simple candle pattern markers:
-  - three-bar reversal
-  - inside bar
-  - outside bar
+- `return_1`
+- `range`
+- `body`
+- `upper_wick`
+- `lower_wick`
+- `volatility_15`
+- `atr_15`
+- `momentum_5`
+- `momentum_15`
+- `distance_high_20`
+- `distance_low_20`
+- `slope_15`
+- `swing_position_20`
+- `compression_20`
 
 ## Session Features
 
-Built once from the synchronized timestamp context:
+The model consumes these 8 shared cross/session features:
 
-- minute-of-day sine
-- minute-of-day cosine
-- day-of-week sine
-- day-of-week cosine
-- session-open-window flag
-
-## Cross-Asset Features
-
-Current cross-asset features include:
-
-- close spread ratio
-- return spread difference
-- body divergence
-- range divergence
-- relative strength 15
-- relative strength 30
-- rolling correlation windows
-- spread z-scores
-- return-difference z-scores
-- co-momentum flag
-- divergence flag
+- `minute_sin`
+- `minute_cos`
+- `is_session_open_window`
+- `spread_return_diff`
+- `relative_strength_15`
+- `corr_30`
+- `spread_z_20`
+- `divergence_flag`
 
 ## Regime Features
 
-Current regime features include:
+The model consumes these 4 regime features:
 
-- joint volatility
-- volatility ratio
-- trend agreement
-- risk-on regime flag
-- divergent regime flag
-- high-volatility regime flag
+- `joint_volatility`
+- `volatility_ratio`
+- `trend_agreement`
+- `divergent_regime`
 
 These are simple but structurally correct. They give the manager and experts explicit context about confirmation, divergence, and volatility state across the two indices.
 
