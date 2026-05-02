@@ -1,8 +1,5 @@
 # Generated datasets and experiment outputs
 artifacts/
-reports/
-data/raw/
-data/processed/
 
 # Python caches and local build outputs
 __pycache__/
