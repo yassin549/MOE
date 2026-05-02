@@ -234,3 +234,73 @@ def collect_feature_columns(frame: pd.DataFrame) -> tuple[dict[str, list[str]], 
         if column in frame.columns and is_numeric_dtype(frame[column])
     ]
     return asset_columns, cross_columns, regime_columns
+
+
+def compute_feature_stability_report(
+    frame: pd.DataFrame,
+    feature_config: FeatureConfig,
+    candidate_columns: list[str],
+) -> dict[str, object]:
+    """Score feature/target association stability across chronological folds."""
+    target_col = feature_config.stability_target_column
+    if target_col not in frame.columns or not is_numeric_dtype(frame[target_col]):
+        raise ValueError(f"Stability target column '{target_col}' is missing or non-numeric.")
+    folds = max(2, int(feature_config.stability_folds))
+    min_samples = max(20, int(feature_config.stability_min_fold_samples))
+    fold_ids = np.array_split(np.arange(len(frame)), folds)
+    per_feature: list[dict[str, object]] = []
+
+    target_series = frame[target_col].astype(float)
+    for column in candidate_columns:
+        if column not in frame.columns or not is_numeric_dtype(frame[column]):
+            continue
+        feature_series = frame[column].astype(float)
+        fold_stats: list[dict[str, float | int]] = []
+        for fold_idx, indexer in enumerate(fold_ids, start=1):
+            fold_feature = feature_series.iloc[indexer]
+            fold_target = target_series.iloc[indexer]
+            valid = fold_feature.notna() & fold_target.notna()
+            n = int(valid.sum())
+            if n < min_samples:
+                fold_stats.append({"fold": fold_idx, "samples": n, "association": 0.0, "sign": 0})
+                continue
+            assoc = float(fold_feature[valid].corr(fold_target[valid]))
+            if not np.isfinite(assoc):
+                assoc = 0.0
+            sign = int(np.sign(assoc))
+            fold_stats.append({"fold": fold_idx, "samples": n, "association": assoc, "sign": sign})
+
+        associations = np.array([float(item["association"]) for item in fold_stats], dtype=np.float64)
+        valid_assoc = associations[np.abs(associations) >= feature_config.stability_min_abs_association]
+        valid_signs = np.sign(valid_assoc)
+        dominant_sign = int(np.sign(valid_signs.sum())) if valid_signs.size else 0
+        consistency = float(np.mean(valid_signs == dominant_sign)) if dominant_sign != 0 and valid_signs.size else 0.0
+        avg_abs_association = float(np.mean(np.abs(associations))) if associations.size else 0.0
+        stability_score = consistency * avg_abs_association
+        selected = bool(
+            dominant_sign != 0
+            and consistency >= feature_config.stability_min_consistency
+            and avg_abs_association >= feature_config.stability_min_abs_association
+        )
+        per_feature.append(
+            {
+                "feature": column,
+                "selected": selected,
+                "dominant_sign": dominant_sign,
+                "consistency": consistency,
+                "avg_abs_association": avg_abs_association,
+                "stability_score": stability_score,
+                "fold_stats": fold_stats,
+            }
+        )
+
+    selected_features = [item["feature"] for item in per_feature if bool(item["selected"])]
+    return {
+        "target_column": target_col,
+        "num_folds": folds,
+        "min_fold_samples": min_samples,
+        "min_abs_association": float(feature_config.stability_min_abs_association),
+        "min_consistency": float(feature_config.stability_min_consistency),
+        "selected_features": selected_features,
+        "per_feature": per_feature,
+    }
