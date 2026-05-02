@@ -86,3 +86,10 @@ def make_run_metadata(
         "cost_model_hash": cost_model_hash,
         "cost_model_parameters": json.dumps(cost_model_parameters, sort_keys=True) if cost_model_parameters is not None else None,
     }
+
+
+def attach_relevance_report(payload: dict[str, Any], relevance: dict[str, Any]) -> dict[str, Any]:
+    """Attach static relevance diagnostics to a report payload."""
+    merged = dict(payload)
+    merged["relevance"] = relevance
+    return merged

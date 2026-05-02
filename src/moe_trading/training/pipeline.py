@@ -16,6 +16,7 @@ from moe_trading.data.dataset import MultiAssetSequenceDataset, collate_sequence
 from moe_trading.data.scaling import FeatureScaler
 from moe_trading.data.splitting import TimeSplit, generate_walk_forward_splits, make_time_split
 from moe_trading.evaluation.metrics import binary_classification_metrics
+from moe_trading.evaluation.relevance import aggregate_uplift_significance, summarize_fold_relevance
 from moe_trading.experiments.tracker import ExperimentTracker
 from moe_trading.labels.audit import generate_phase1_audit_artifacts
 from moe_trading.models.moe import MultiAssetMoE, save_model
@@ -161,6 +162,57 @@ def _active_expert_mask(frame, setup_names: list[str]) -> torch.Tensor:
     return torch.tensor(active_mask, dtype=torch.float32)
 
 
+
+
+def _time_feature_indices(feature_columns: list[str]) -> list[int]:
+    keys = ("minute", "dow", "session", "hour", "day")
+    return [idx for idx, name in enumerate(feature_columns) if any(k in name for k in keys)]
+
+
+def _collect_validation_relevance(
+    model: MultiAssetMoE,
+    loader: DataLoader,
+    device: torch.device,
+    feature_columns: list[str],
+    setup_names: list[str],
+) -> dict[str, Any]:
+    model.eval()
+    probs_full=[]; targets=[]; probs_time=[]
+    setup_scores={f"{asset}_{setup}": [[], []] for asset in ("us100","us500") for setup in setup_names}
+    feature_probs={name: [] for name in feature_columns}
+    time_idx=_time_feature_indices(feature_columns)
+    with torch.inference_mode():
+        for raw_batch in loader:
+            batch = _to_device(raw_batch, device)
+            out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=batch["manager_context"], account_context=batch["account_context"])
+            probs_full.append(out.manager_trade_probability.detach().cpu().numpy().reshape(-1))
+            targets.append(batch["manager_labels"][:,0].detach().cpu().numpy().reshape(-1))
+            expert_prob = torch.sigmoid(out.expert_setup_logits).detach().cpu().numpy()
+            expert_target = batch["expert_labels"].detach().cpu().numpy()
+            for a_idx, asset in enumerate(("us100","us500")):
+                for s_idx, setup in enumerate(setup_names):
+                    key=f"{asset}_{setup}"
+                    setup_scores[key][0].append(expert_target[:,a_idx,s_idx].reshape(-1))
+                    setup_scores[key][1].append(expert_prob[:,a_idx,s_idx].reshape(-1))
+
+            t_batch = dict(batch)
+            t_batch["manager_context"] = torch.zeros_like(batch["manager_context"])
+            if time_idx:
+                t_batch["manager_context"][:, time_idx] = batch["manager_context"][:, time_idx]
+            t_out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=t_batch["manager_context"], account_context=batch["account_context"])
+            probs_time.append(t_out.manager_trade_probability.detach().cpu().numpy().reshape(-1))
+
+            for f_idx, name in enumerate(feature_columns):
+                p_batch = dict(batch)
+                perm = torch.randperm(batch["manager_context"].size(0), device=device)
+                p_batch["manager_context"] = batch["manager_context"].clone()
+                p_batch["manager_context"][:, f_idx] = p_batch["manager_context"][perm, f_idx]
+                p_out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=p_batch["manager_context"], account_context=batch["account_context"])
+                feature_probs[name].append(p_out.manager_trade_probability.detach().cpu().numpy().reshape(-1))
+
+    setup_arrays={k:(np.concatenate(v[0]), np.concatenate(v[1])) for k,v in setup_scores.items()}
+    feature_arrays={k:np.concatenate(v) for k,v in feature_probs.items()}
+    return summarize_fold_relevance(np.concatenate(targets), np.concatenate(probs_full), np.concatenate(probs_time), feature_arrays, setup_arrays)
 def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: Path, split_name: str) -> dict[str, Any]:
     default_account_context = encode_account_state(AccountState(), PropRuleEngine(config.prop))
     train_account_context = build_account_context_array(split.train, config) if config.train.use_dynamic_account_context else None
@@ -241,8 +293,10 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
     save_json({"feature_columns": feature_columns, **scaler.to_dict()}, scaler_path)
     calibration_path = split_dir / "calibration.json"
     save_calibration_artifact(calibration_artifact, calibration_path)
+    relevance = _collect_validation_relevance(model, val_loader, device, feature_columns, config.model.setup_names)
     tracker = ExperimentTracker(split_dir)
     tracker.log_metrics("scaler", {"feature_columns": feature_columns, **scaler.to_dict()})
+    tracker.log_metrics("relevance", relevance)
     return {
         "history": history,
         "test_metrics": test_metrics,
@@ -250,6 +304,7 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
         "scaler_path": str(scaler_path),
         "calibration_path": str(calibration_path),
         "selection_score": best_val,
+        "relevance": relevance,
     }
 
 
@@ -494,6 +549,11 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
     for split_idx, split in enumerate(splits, start=1):
         split_results.append(_fit_single_split(config, bundle, split, Path(config.experiment.output_dir), f"split_{split_idx:02d}"))
 
+    relevance_reports = [result["relevance"] for result in split_results]
+    relevance_summary = aggregate_uplift_significance(relevance_reports)
+    if not relevance_summary["significant"]:
+        raise ValueError("QA failed: full-feature uplift is not significantly above null across contiguous folds.")
+
     summary = {
         "config": asdict(config),
         "num_splits": len(split_results),
@@ -503,6 +563,8 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
         "calibration_paths": [result["calibration_path"] for result in split_results],
         "selection_scores": [result["selection_score"] for result in split_results],
         "phase1_audit": phase1_audit,
+        "relevance_by_fold": relevance_reports,
+        "relevance_summary": relevance_summary,
     }
     tracker.log_metrics("training_summary", summary)
     return summary
