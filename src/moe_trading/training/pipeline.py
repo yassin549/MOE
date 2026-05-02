@@ -173,14 +173,14 @@ def _collect_validation_relevance(
     model: MultiAssetMoE,
     loader: DataLoader,
     device: torch.device,
-    feature_columns: list[str],
+    manager_feature_columns: list[str],
     setup_names: list[str],
 ) -> dict[str, Any]:
     model.eval()
     probs_full=[]; targets=[]; probs_time=[]
     setup_scores={f"{asset}_{setup}": [[], []] for asset in ("us100","us500") for setup in setup_names}
-    feature_probs={name: [] for name in feature_columns}
-    time_idx=_time_feature_indices(feature_columns)
+    per_feature_scores={name: [] for name in manager_feature_columns}
+    time_idx=_time_feature_indices(manager_feature_columns)
     with torch.inference_mode():
         for raw_batch in loader:
             batch = _to_device(raw_batch, device)
@@ -202,23 +202,28 @@ def _collect_validation_relevance(
             t_out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=t_batch["manager_context"], account_context=batch["account_context"])
             probs_time.append(t_out.manager_trade_probability.detach().cpu().numpy().reshape(-1))
 
-            for f_idx, name in enumerate(feature_columns):
-                p_batch = dict(batch)
-                perm = torch.randperm(batch["manager_context"].size(0), device=device)
-                p_batch["manager_context"] = batch["manager_context"].clone()
-                p_batch["manager_context"][:, f_idx] = p_batch["manager_context"][perm, f_idx]
-                p_out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=p_batch["manager_context"], account_context=batch["account_context"])
-                feature_probs[name].append(p_out.manager_trade_probability.detach().cpu().numpy().reshape(-1))
+            y_batch = batch["manager_labels"][:,0].detach().cpu().numpy().reshape(-1)
+            for f_idx, name in enumerate(manager_feature_columns):
+                batch_scores=[]
+                for _ in range(8):
+                    p_batch = dict(batch)
+                    perm = torch.randperm(batch["manager_context"].size(0), device=device)
+                    p_batch["manager_context"] = batch["manager_context"].clone()
+                    p_batch["manager_context"][:, f_idx] = p_batch["manager_context"][perm, f_idx]
+                    p_out = model(asset_sequences=batch["asset_sequences"], cross_sequence=batch["cross_sequence"], regime_sequence=batch["regime_sequence"], manager_context=p_batch["manager_context"], account_context=batch["account_context"])
+                    p_prob = p_out.manager_trade_probability.detach().cpu().numpy().reshape(-1)
+                    batch_scores.append(binary_classification_metrics(y_batch, p_prob)["auc"])
+                per_feature_scores[name].append(float(np.mean(batch_scores)))
 
     setup_arrays={k:(np.concatenate(v[0]), np.concatenate(v[1])) for k,v in setup_scores.items()}
-    feature_arrays={k:np.concatenate(v) for k,v in feature_probs.items()}
-    return summarize_fold_relevance(np.concatenate(targets), np.concatenate(probs_full), np.concatenate(probs_time), feature_arrays, setup_arrays)
+    return summarize_fold_relevance(np.concatenate(targets), np.concatenate(probs_full), np.concatenate(probs_time), per_feature_scores, setup_arrays)
 def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: Path, split_name: str) -> dict[str, Any]:
     default_account_context = encode_account_state(AccountState(), PropRuleEngine(config.prop))
     train_account_context = build_account_context_array(split.train, config) if config.train.use_dynamic_account_context else None
     val_account_context = build_account_context_array(split.validation, config) if config.train.use_dynamic_account_context else None
     test_account_context = build_account_context_array(split.test, config) if config.train.use_dynamic_account_context else None
     split, scaler, feature_columns = _scale_split(bundle, split)
+    manager_feature_columns = bundle.cross_asset_feature_columns + bundle.regime_feature_columns
     train_dataset = MultiAssetSequenceDataset(
         _make_bundle(bundle, split.train),
         config.data.sequence_length,
@@ -293,7 +298,7 @@ def _fit_single_split(config: AppConfig, bundle, split: TimeSplit, output_dir: P
     save_json({"feature_columns": feature_columns, **scaler.to_dict()}, scaler_path)
     calibration_path = split_dir / "calibration.json"
     save_calibration_artifact(calibration_artifact, calibration_path)
-    relevance = _collect_validation_relevance(model, val_loader, device, feature_columns, config.model.setup_names)
+    relevance = _collect_validation_relevance(model, val_loader, device, manager_feature_columns, config.model.setup_names)
     tracker = ExperimentTracker(split_dir)
     tracker.log_metrics("scaler", {"feature_columns": feature_columns, **scaler.to_dict()})
     tracker.log_metrics("relevance", relevance)

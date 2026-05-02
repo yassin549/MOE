@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from math import comb
 from typing import Any
 
 import numpy as np
@@ -35,7 +36,13 @@ def _block_indices(size: int, block_size: int) -> list[np.ndarray]:
     return [np.arange(i, min(i + block_size, size)) for i in range(0, size, block_size)]
 
 
-def label_permutation_test(y_true: np.ndarray, y_prob: np.ndarray, permutations: int = 200, block_size: int = 128, seed: int = 7) -> PermutationResult:
+def label_permutation_test(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    permutations: int = 200,
+    block_size: int = 128,
+    seed: int = 7,
+) -> tuple[PermutationResult, np.ndarray]:
     rng = np.random.default_rng(seed)
     observed = _auc(y_true, y_prob)
     blocks = _block_indices(len(y_true), max(1, block_size))
@@ -46,21 +53,26 @@ def label_permutation_test(y_true: np.ndarray, y_prob: np.ndarray, permutations:
             shuffled[block] = shuffled[block][rng.permutation(len(block))]
         null[i] = _auc(shuffled, y_prob)
     p_value = float((1.0 + (null >= observed).sum()) / (1.0 + permutations))
-    effect = float(observed - null.mean())
-    return PermutationResult(p_value=p_value, effect_size=effect, observed=float(observed), null_mean=float(null.mean()))
+    result = PermutationResult(p_value=p_value, effect_size=float(observed - null.mean()), observed=float(observed), null_mean=float(null.mean()))
+    return result, null
 
 
-def feature_permutation_test(y_true: np.ndarray, y_prob_full: np.ndarray, per_feature_probs: dict[str, np.ndarray]) -> dict[str, PermutationResult]:
+def feature_permutation_test(
+    y_true: np.ndarray,
+    y_prob_full: np.ndarray,
+    per_feature_probs: dict[str, list[np.ndarray]],
+) -> dict[str, PermutationResult]:
     baseline = _auc(y_true, y_prob_full)
     out: dict[str, PermutationResult] = {}
-    for feature, probs in per_feature_probs.items():
-        perm_score = _auc(y_true, probs)
-        effect = baseline - perm_score
+    for feature, scores in per_feature_probs.items():
+        values = np.asarray(scores, dtype=np.float64)
+        null_mean = float(values.mean()) if values.size else baseline
+        p_value = float((1.0 + (values <= baseline).sum()) / (1.0 + values.size)) if values.size else 1.0
         out[feature] = PermutationResult(
-            p_value=float(1.0 if effect <= 0 else 0.0),
-            effect_size=float(effect),
-            observed=float(perm_score),
-            null_mean=float(baseline),
+            p_value=p_value,
+            effect_size=float(baseline - null_mean),
+            observed=baseline,
+            null_mean=null_mean,
         )
     return out
 
@@ -69,39 +81,37 @@ def summarize_fold_relevance(
     y_true: np.ndarray,
     y_prob_full: np.ndarray,
     y_prob_time_only: np.ndarray,
-    per_feature_probs: dict[str, np.ndarray],
+    per_feature_scores: dict[str, list[float]],
     setup_scores: dict[str, tuple[np.ndarray, np.ndarray]],
 ) -> dict[str, Any]:
-    manager_label_test = label_permutation_test(y_true, y_prob_full)
+    manager_label_test, manager_null = label_permutation_test(y_true, y_prob_full)
     manager_full_auc = _auc(y_true, y_prob_full)
     manager_time_auc = _auc(y_true, y_prob_time_only)
     uplift = manager_full_auc - manager_time_auc
-    setup_label_tests = {k: label_permutation_test(v[0], v[1]).__dict__ for k, v in setup_scores.items()}
-    per_feature = feature_permutation_test(y_true, y_prob_full, per_feature_probs)
+    setup_label_tests = {k: asdict(label_permutation_test(v[0], v[1])[0]) for k, v in setup_scores.items()}
+    per_feature = feature_permutation_test(y_true, y_prob_full, {k: [float(x) for x in v] for k, v in per_feature_scores.items()})
     return {
         "manager_target": {
-            "label_permutation": manager_label_test.__dict__,
+            "label_permutation": asdict(manager_label_test),
+            "label_permutation_null": manager_null.tolist(),
             "full_auc": float(manager_full_auc),
             "time_only_auc": float(manager_time_auc),
             "full_feature_uplift": float(uplift),
         },
         "setup_targets": setup_label_tests,
-        "feature_permutation": {k: v.__dict__ for k, v in per_feature.items()},
+        "feature_permutation": {k: asdict(v) for k, v in per_feature.items()},
     }
 
 
 def aggregate_uplift_significance(fold_reports: list[dict[str, Any]], alpha: float = 0.05) -> dict[str, Any]:
-    uplifts = np.array([float(r["manager_target"]["full_feature_uplift"]) for r in fold_reports], dtype=np.float64)
-    null = np.array([float(r["manager_target"]["label_permutation"]["null_mean"]) for r in fold_reports], dtype=np.float64)
-    deltas = uplifts - null
+    deltas = np.array([float(r["manager_target"]["full_feature_uplift"]) for r in fold_reports], dtype=np.float64)
     observed = float(deltas.mean()) if deltas.size else 0.0
-    # Sign test over contiguous folds
     positive = int((deltas > 0).sum())
     n = int(deltas.size)
-    p_value = float(1.0 if n == 0 else sum(np.math.comb(n, k) for k in range(positive, n + 1)) / (2**n))
+    p_value = float(1.0 if n == 0 else sum(comb(n, k) for k in range(positive, n + 1)) / (2**n))
     return {
         "num_folds": n,
-        "mean_uplift_minus_null": observed,
+        "mean_uplift": observed,
         "positive_folds": positive,
         "p_value": p_value,
         "significant": bool(p_value < alpha and observed > 0),
