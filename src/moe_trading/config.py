@@ -41,6 +41,12 @@ class FeatureConfig:
     zscore_windows: list[int] = field(default_factory=lambda: [20, 60])
     session_open_hours_utc: list[int] = field(default_factory=lambda: [7, 8, 13, 14])
     use_volume_features: bool = True
+    enable_stability_screen: bool = False
+    stability_target_column: str = "manager_trade_target"
+    stability_folds: int = 5
+    stability_min_fold_samples: int = 250
+    stability_min_abs_association: float = 0.01
+    stability_min_consistency: float = 0.8
 
 
 @dataclass(slots=True)

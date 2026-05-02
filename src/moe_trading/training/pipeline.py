@@ -20,6 +20,7 @@ from moe_trading.experiments.tracker import ExperimentTracker
 from moe_trading.labels.audit import generate_phase1_audit_artifacts
 from moe_trading.models.moe import MultiAssetMoE, save_model
 from moe_trading.pipeline import build_research_frame
+from moe_trading.features.engineering import compute_feature_stability_report
 from moe_trading.policy.decision import ACCOUNT_FEATURE_NAMES, encode_account_state
 from moe_trading.account.rules import PropRuleEngine
 from moe_trading.account.state import AccountState
@@ -473,6 +474,46 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
     bundle = build_research_frame(config)
     tracker = ExperimentTracker(config.experiment.output_dir)
     tracker.log_config(config)
+    selected_features: list[str] | None = None
+    if config.features.enable_stability_screen:
+        all_features = list(
+            dict.fromkeys(
+                bundle.asset_feature_columns["US100"]
+                + bundle.asset_feature_columns["US500"]
+                + bundle.cross_asset_feature_columns
+                + bundle.regime_feature_columns
+            )
+        )
+        stability_report = compute_feature_stability_report(bundle.frame, config.features, all_features)
+        selected_features = list(stability_report["selected_features"])
+        asset_selected = {
+            "US100": [col for col in bundle.asset_feature_columns["US100"] if col in selected_features],
+            "US500": [col for col in bundle.asset_feature_columns["US500"] if col in selected_features],
+        }
+        cross_selected = [col for col in bundle.cross_asset_feature_columns if col in selected_features]
+        regime_selected = [col for col in bundle.regime_feature_columns if col in selected_features]
+        if not asset_selected["US100"] or not asset_selected["US500"] or not (cross_selected or regime_selected):
+            raise ValueError("Stability screen removed too many features; relax thresholds or disable stability mode.")
+        bundle = type(bundle)(
+            frame=bundle.frame,
+            asset_feature_columns=asset_selected,
+            cross_asset_feature_columns=cross_selected,
+            regime_feature_columns=regime_selected,
+            label_columns=bundle.label_columns,
+        )
+        output_dir = Path(config.experiment.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        save_json(stability_report, output_dir / "feature_stability_report.json")
+        tracker.log_metrics(
+            "feature_stability",
+            {
+                "enabled": True,
+                "selected_feature_count": len(selected_features),
+                "total_candidate_count": len(all_features),
+            },
+        )
+    else:
+        tracker.log_metrics("feature_stability", {"enabled": False})
     phase1_audit = generate_phase1_audit_artifacts(bundle.frame, config, Path(config.experiment.output_dir) / "phase1_audit")
     tracker.log_metrics("phase1_audit_summary", phase1_audit)
 
@@ -503,6 +544,7 @@ def run_training_pipeline(config: AppConfig) -> dict[str, Any]:
         "calibration_paths": [result["calibration_path"] for result in split_results],
         "selection_scores": [result["selection_score"] for result in split_results],
         "phase1_audit": phase1_audit,
+        "selected_features": selected_features,
     }
     tracker.log_metrics("training_summary", summary)
     return summary
