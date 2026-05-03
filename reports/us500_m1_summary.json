@@ -1,0 +1,293 @@
+{
+  "symbol": "US500",
+  "instrumentId": "usa500idxusd",
+  "timeframe": "m1",
+  "source": "Dukascopy",
+  "dateRange": {
+    "fromInclusive": "2021-04-27",
+    "toExclusive": "2026-04-28"
+  },
+  "files": {
+    "raw": "C:\\Users\\khoua\\Desktop\\MoE\\data\\raw\\US500_m1_raw.csv",
+    "cleaned": "C:\\Users\\khoua\\Desktop\\MoE\\data\\processed\\US500_m1_clean.csv"
+  },
+  "rowCounts": {
+    "rawRowsRead": 1683883,
+    "cleanedRowsWritten": 1683883,
+    "duplicatesDropped": 0,
+    "invalidRowsDropped": 0,
+    "nonAscendingDropped": 0,
+    "zeroVolumeDropped": 0
+  },
+  "tradingDays": 1557,
+  "barsPerTradingDay": {
+    "average": 1081.4919717405267,
+    "median": 1296,
+    "min": 15,
+    "max": 1335
+  },
+  "gaps": {
+    "count": 23534,
+    "averageMinutes": 41.196184244072406,
+    "medianMinutes": 2,
+    "maxMinutes": 4427
+  },
+  "busiestDays": [
+    {
+      "key": "2021-09-20",
+      "bars": 1335
+    },
+    {
+      "key": "2021-11-30",
+      "bars": 1335
+    },
+    {
+      "key": "2021-12-02",
+      "bars": 1335
+    },
+    {
+      "key": "2021-12-06",
+      "bars": 1335
+    },
+    {
+      "key": "2021-12-07",
+      "bars": 1335
+    },
+    {
+      "key": "2021-12-20",
+      "bars": 1335
+    },
+    {
+      "key": "2021-12-21",
+      "bars": 1335
+    },
+    {
+      "key": "2022-01-06",
+      "bars": 1335
+    },
+    {
+      "key": "2022-01-20",
+      "bars": 1335
+    },
+    {
+      "key": "2022-01-24",
+      "bars": 1335
+    }
+  ],
+  "byHourUtc": {
+    "10": {
+      "bars": 76662,
+      "avgAbsReturnPct": 0.012530068480994548,
+      "avgVolume": 0.0701623281799083
+    },
+    "11": {
+      "bars": 76716,
+      "avgAbsReturnPct": 0.013329682914997804,
+      "avgVolume": 0.07160841236794854
+    },
+    "12": {
+      "bars": 76986,
+      "avgAbsReturnPct": 0.01682779374468848,
+      "avgVolume": 0.09316393922359029
+    },
+    "13": {
+      "bars": 77170,
+      "avgAbsReturnPct": 0.024752570753289883,
+      "avgVolume": 0.2148008297578689
+    },
+    "14": {
+      "bars": 77208,
+      "avgAbsReturnPct": 0.030794950955044035,
+      "avgVolume": 0.33311086257178396
+    },
+    "15": {
+      "bars": 77088,
+      "avgAbsReturnPct": 0.028231406598327295,
+      "avgVolume": 0.3084874148742728
+    },
+    "16": {
+      "bars": 77104,
+      "avgAbsReturnPct": 0.023588163597439114,
+      "avgVolume": 0.24322303063933484
+    },
+    "17": {
+      "bars": 75836,
+      "avgAbsReturnPct": 0.022666215651274503,
+      "avgVolume": 0.22308471057498488
+    },
+    "18": {
+      "bars": 74725,
+      "avgAbsReturnPct": 0.023858582287911198,
+      "avgVolume": 0.23324491701320138
+    },
+    "19": {
+      "bars": 74688,
+      "avgAbsReturnPct": 0.02664117164940819,
+      "avgVolume": 0.25654553298146204
+    },
+    "20": {
+      "bars": 37386,
+      "avgAbsReturnPct": 0.024737564955997406,
+      "avgVolume": 0.1995941784538432
+    },
+    "21": {
+      "bars": 6244,
+      "avgAbsReturnPct": 0.01822183004151688,
+      "avgVolume": 0.08699146396646659
+    },
+    "22": {
+      "bars": 47625,
+      "avgAbsReturnPct": 0.013178758525638386,
+      "avgVolume": 0.026414303946312744
+    },
+    "23": {
+      "bars": 73900,
+      "avgAbsReturnPct": 0.01071087790597015,
+      "avgVolume": 0.029257525970008094
+    },
+    "00": {
+      "bars": 76552,
+      "avgAbsReturnPct": 0.011392205471607832,
+      "avgVolume": 0.045069944663909796
+    },
+    "01": {
+      "bars": 76778,
+      "avgAbsReturnPct": 0.01103567674748504,
+      "avgVolume": 0.04858696947800381
+    },
+    "02": {
+      "bars": 75320,
+      "avgAbsReturnPct": 0.00893030036661946,
+      "avgVolume": 0.03642216796408327
+    },
+    "03": {
+      "bars": 73318,
+      "avgAbsReturnPct": 0.008070972489073782,
+      "avgVolume": 0.02900715712661706
+    },
+    "04": {
+      "bars": 70539,
+      "avgAbsReturnPct": 0.007268459095610703,
+      "avgVolume": 0.022154829341410845
+    },
+    "05": {
+      "bars": 74842,
+      "avgAbsReturnPct": 0.009037339374191882,
+      "avgVolume": 0.032987217966176534
+    },
+    "06": {
+      "bars": 76197,
+      "avgAbsReturnPct": 0.010798221940170378,
+      "avgVolume": 0.048369891914550156
+    },
+    "07": {
+      "bars": 77009,
+      "avgAbsReturnPct": 0.014880316664726796,
+      "avgVolume": 0.09585056079888982
+    },
+    "08": {
+      "bars": 77140,
+      "avgAbsReturnPct": 0.01526825791972818,
+      "avgVolume": 0.10218947572147574
+    },
+    "09": {
+      "bars": 76850,
+      "avgAbsReturnPct": 0.013028676576872612,
+      "avgVolume": 0.0787035679796473
+    }
+  },
+  "byWeekday": {
+    "Tuesday": {
+      "bars": 341097,
+      "avgAbsReturnPct": 0.0160884727908597,
+      "avgVolume": 0.12060719549943578
+    },
+    "Wednesday": {
+      "bars": 339153,
+      "avgAbsReturnPct": 0.016351278605033447,
+      "avgVolume": 0.12297528483142169
+    },
+    "Thursday": {
+      "bars": 337988,
+      "avgAbsReturnPct": 0.016939359991581686,
+      "avgVolume": 0.1289748118033429
+    },
+    "Friday": {
+      "bars": 309721,
+      "avgAbsReturnPct": 0.017706780982238463,
+      "avgVolume": 0.1381204968704887
+    },
+    "Sunday": {
+      "bars": 24992,
+      "avgAbsReturnPct": 0.016680406076284605,
+      "avgVolume": 0.0423112017624345
+    },
+    "Monday": {
+      "bars": 330932,
+      "avgAbsReturnPct": 0.015627893525871735,
+      "avgVolume": 0.1166801111848328
+    }
+  },
+  "byMonth": {
+    "April": {
+      "bars": 136603,
+      "avgAbsReturnPct": 0.021044059591358456,
+      "avgVolume": 0.17440636955661476
+    },
+    "May": {
+      "bars": 144314,
+      "avgAbsReturnPct": 0.017403945716399024,
+      "avgVolume": 0.13702283172537463
+    },
+    "June": {
+      "bars": 138808,
+      "avgAbsReturnPct": 0.01523324516450614,
+      "avgVolume": 0.09656179238315735
+    },
+    "July": {
+      "bars": 140261,
+      "avgAbsReturnPct": 0.013389652054374111,
+      "avgVolume": 0.09672603741589281
+    },
+    "August": {
+      "bars": 145367,
+      "avgAbsReturnPct": 0.014436449608478985,
+      "avgVolume": 0.11067861835220749
+    },
+    "September": {
+      "bars": 140582,
+      "avgAbsReturnPct": 0.01564684225705299,
+      "avgVolume": 0.12446925951071494
+    },
+    "October": {
+      "bars": 145614,
+      "avgAbsReturnPct": 0.017324263179759967,
+      "avgVolume": 0.10776565941687735
+    },
+    "November": {
+      "bars": 137617,
+      "avgAbsReturnPct": 0.014997761127253503,
+      "avgVolume": 0.09973553285055985
+    },
+    "December": {
+      "bars": 138044,
+      "avgAbsReturnPct": 0.014011206398481213,
+      "avgVolume": 0.0922079523881951
+    },
+    "January": {
+      "bars": 140096,
+      "avgAbsReturnPct": 0.01654168077748063,
+      "avgVolume": 0.12825692814319942
+    },
+    "February": {
+      "bars": 132003,
+      "avgAbsReturnPct": 0.01726286353860139,
+      "avgVolume": 0.14002637931736447
+    },
+    "March": {
+      "bars": 144574,
+      "avgAbsReturnPct": 0.021009179690138567,
+      "avgVolume": 0.1807572264701124
+    }
+  }
+}
